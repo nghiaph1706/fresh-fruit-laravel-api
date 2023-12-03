@@ -26,4 +26,9 @@ class OtpGateway
 	{
 		return $this->gateway->checkVerification($id, $code, $phone_number);
 	}
+
+	public function sendSms($phone_number, $messageBody)
+	{
+		return $this->gateway->sendSms($phone_number, $messageBody);
+	}
 }

@@ -3,6 +3,7 @@
 
 namespace Marvel\Http\Controllers;
 
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
@@ -15,7 +16,7 @@ use Marvel\Http\Requests\WishlistCreateRequest;
 use Marvel\Database\Repositories\WishlistRepository;
 use Marvel\Http\Requests\AbusiveReportCreateRequest;
 use Prettus\Validator\Exceptions\ValidatorException;
-
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class WishlistController extends CoreController
 {
@@ -49,7 +50,11 @@ class WishlistController extends CoreController
      */
     public function store(WishlistCreateRequest $request)
     {
-        return $this->repository->storeWishlist($request);
+        try {
+            return $this->repository->storeWishlist($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_CREATE_THE_RESOURCE);
+        }
     }
 
     /**
@@ -61,7 +66,11 @@ class WishlistController extends CoreController
      */
     public function toggle(WishlistCreateRequest $request)
     {
-        return $this->repository->toggleWishlist($request);
+        try {
+            return $this->repository->toggleWishlist($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
+        }
     }
 
     /**
@@ -72,21 +81,29 @@ class WishlistController extends CoreController
      */
     public function destroy(Request $request, $id)
     {
-        $request->id = $id;
-        return $this->delete($request);
+        try {
+            $request->id = $id;
+            return $this->delete($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_DELETE_THE_RESOURCE);
+        }
     }
 
     public function delete(Request $request)
     {
-        if (!$request->user()) {
-            throw new MarvelException(NOT_AUTHORIZED);
+        try {
+            if (!$request->user()) {
+                throw new AuthorizationException(NOT_AUTHORIZED);
+            }
+            $product = Product::where('id', $request->id)->first();
+            $wishlist = $this->repository->where('product_id', $product->id)->where('user_id', auth()->user()->id)->first();
+            if (!empty($wishlist)) {
+                return $wishlist->delete();
+            }
+            throw new HttpException(404, NOT_FOUND);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_DELETE_THE_RESOURCE);
         }
-        $product = Product::where('id', $request->id)->first();
-        $wishlist = $this->repository->where('product_id', $product->id)->where('user_id', auth()->user()->id)->first();
-        if (!empty($wishlist)) {
-            return $wishlist->delete();
-        }
-        throw new MarvelException(NOT_FOUND);
     }
 
     /**

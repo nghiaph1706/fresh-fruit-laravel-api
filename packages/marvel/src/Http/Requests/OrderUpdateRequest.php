@@ -26,7 +26,6 @@ class OrderUpdateRequest extends FormRequest
             'amount'          => 'numeric',
             'paid_total'      => 'numeric',
             'total'           => 'numeric',
-            // 'status'       => 'exists:Marvel\Database\Models\OrderStatus,id',
             'order_status'    => ['required', Rule::in([
                 OrderStatus::PROCESSING,
                 OrderStatus::COMPLETED,
@@ -36,6 +35,7 @@ class OrderUpdateRequest extends FormRequest
             ])],
             'customer_id'     => 'exists:Marvel\Database\Models\User,id',
             'payment_gateway' => 'string',
+            'altered_payment_gateway' => 'nullable|string',
         ];
     }
 

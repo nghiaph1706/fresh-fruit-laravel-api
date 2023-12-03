@@ -7,6 +7,8 @@ use Marvel\Database\Models\Order;
 use Marvel\Enums\OrderStatus;
 use Marvel\Enums\PaymentStatus;
 use Marvel\Events\OrderCancelled;
+use Marvel\Events\OrderDelivered;
+use Marvel\Events\OrderStatusChanged;
 use Marvel\Events\PaymentFailed;
 use Marvel\Events\PaymentSuccess;
 
@@ -112,7 +114,7 @@ trait OrderStatusManagerWithPaymentTrait
                     break;
 
                 case 'order-completed':
-                    # code...
+                    event(new OrderDelivered($order));
                     # send notification to user about order is delivered.
                     break;
 
@@ -120,6 +122,8 @@ trait OrderStatusManagerWithPaymentTrait
                     $this->orderStatusManagementOnCancelled($order);
                     event(new OrderCancelled($order));
                     break;
+                default:
+                    event(new OrderStatusChanged($order));
             }
         } elseif ($payment_status === PaymentStatus::AWAITING_FOR_APPROVAL) {
             switch ($order_status) {
@@ -167,26 +171,6 @@ trait OrderStatusManagerWithPaymentTrait
     public function orderStatusManagementOnCOD($order, $prev_status, $new_status)
     {
         switch ($new_status) {
-            case OrderStatus::PENDING:
-                # code...
-                break;
-
-            case OrderStatus::PROCESSING:
-                # code...
-                break;
-
-            case OrderStatus::AT_LOCAL_FACILITY:
-                # code...
-                break;
-
-            case OrderStatus::OUT_FOR_DELIVERY:
-                # code...
-                break;
-
-            case OrderStatus::COMPLETED:
-                # code...
-                break;
-
             case OrderStatus::CANCELLED:
                 # code...
                 $this->orderStatusManagementOnCancelled($order);
@@ -201,6 +185,9 @@ trait OrderStatusManagerWithPaymentTrait
             case OrderStatus::FAILED:
                 # code...
                 break;
+            default:
+                event(new OrderStatusChanged($order));
+                break;
         }
     }
 
@@ -209,7 +196,7 @@ trait OrderStatusManagerWithPaymentTrait
      *
      * @param  mixed $order
      * @param  string $tracking_number
-     * @return void
+     * @return bool
      */
     public function orderAlreadyExists($tracking_number)
     {
@@ -251,10 +238,12 @@ trait OrderStatusManagerWithPaymentTrait
 
         // if order is child order
         if ($order->parent_id) {
-            $reducedRevenueAmount =  $amount - $order->amount;
-            $reducedTaxAmount = $parent_order->sales_tax - ($order->amount * $tax_rate) / 1000000; //for precision
+            $reducedRevenueAmount = $amount - $order->amount;
+            $cancelledTaxAmount = ($order->amount * $tax_rate) / 1000000;
+            $reducedTaxAmount = $parent_order->sales_tax - $cancelledTaxAmount; //for precision
 
             $parent_order->sales_tax = $reducedTaxAmount;
+            $parent_order->cancelled_tax += $cancelledTaxAmount;
 
             $parent_order->paid_total = $reducedRevenueAmount + $reducedTaxAmount + $delivery_fee;
             $parent_order->total = $reducedRevenueAmount + $reducedTaxAmount + $delivery_fee;
@@ -262,6 +251,7 @@ trait OrderStatusManagerWithPaymentTrait
             $parent_order->save();
             //TODO: give refund to customer if order is pre paid
             if ($parent_order->paid_total == 0) {
+                $parent_order->cancelled_delivery_fee = $parent_order->delivery_fee;
                 $parent_order->delivery_fee = 0;
                 $parent_order->sales_tax = 0;
                 $parent_order->save();
@@ -282,6 +272,8 @@ trait OrderStatusManagerWithPaymentTrait
                 $childOrder->save();
             }
             $parent_order->cancelled_amount += $parent_order->paid_total;
+            $parent_order->cancelled_tax += $parent_order->sales_tax;
+            $parent_order->cancelled_delivery_fee = $parent_order->delivery_fee;
             $parent_order->sales_tax = 0;
             $parent_order->delivery_fee = 0;
             $parent_order->paid_total = 0;
@@ -290,5 +282,19 @@ trait OrderStatusManagerWithPaymentTrait
             //TODO: give refund to customer if order is pre paid
 
         }
+    }
+
+   
+    /**
+     * The function checks if the order status is one of the final statuses.
+     * 
+     * @param Order order The parameter "order" is an instance of the Order class.
+     * 
+     * @return bool a boolean value, indicating whether the order status is final or not.
+     */
+    public function checkOrderStatusIsFinal(Order $order): bool
+    {
+        $orderStatuses = [OrderStatus::COMPLETED, OrderStatus::CANCELLED, OrderStatus::REFUNDED];
+        return in_array($order->order_status, $orderStatuses);
     }
 }

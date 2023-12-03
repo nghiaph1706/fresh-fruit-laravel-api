@@ -3,13 +3,18 @@
 namespace Marvel\Http\Controllers;
 
 use Exception;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Marvel\Database\Models\Product;
 use Marvel\Database\Repositories\AuthorRepository;
+use Marvel\Enums\Permission;
 use Marvel\Exceptions\MarvelException;
 use Marvel\Http\Requests\AuthorRequest;
+use Marvel\Http\Resources\AuthorResource;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class AuthorController extends CoreController
 {
@@ -25,13 +30,20 @@ class AuthorController extends CoreController
      * Display a listing of the resource.
      *
      * @param Request $request
-     * @return Collection|Product[]
+     *
      */
     public function index(Request $request)
     {
-        $language = $request->language ?? DEFAULT_LANGUAGE;
         $limit = $request->limit ?   $request->limit : 15;
-        return $this->repository->where('language', $language)->paginate($limit);
+        $authors = $this->fetchAuthors($request)->paginate($limit);
+        $data = AuthorResource::collection($authors)->response()->getData(true);
+        return formatAPIResourcePaginate($data);
+    }
+
+    public function fetchAuthors(Request $request)
+    {
+        $language = $request->language ?? DEFAULT_LANGUAGE;
+        return $this->repository->where('language', $language);
     }
 
     /**
@@ -42,10 +54,13 @@ class AuthorController extends CoreController
      */
     public function store(AuthorRequest $request)
     {
-        if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
-            return $this->repository->storeAuthor($request);
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
+        try {
+            if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
+                return $this->repository->storeAuthor($request);
+            }
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $e) {
+            throw new MarvelException(COULD_NOT_CREATE_THE_RESOURCE);
         }
     }
 
@@ -57,8 +72,13 @@ class AuthorController extends CoreController
      */
     public function show(Request $request, $slug)
     {
-        $request->slug = $slug;
-        return $this->fetchAuthor($request);
+        try {
+            $request->slug = $slug;
+            $author = $this->fetchAuthor($request);
+            return new AuthorResource($author);
+        } catch (MarvelException $th) {
+            throw new MarvelException(NOT_FOUND);
+        }
     }
 
     /**
@@ -74,7 +94,7 @@ class AuthorController extends CoreController
         try {
             $author = $this->repository->where('slug', $slug)->where('language', $language)->firstOrFail();
         } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
+            throw new ModelNotFoundException(NOT_FOUND);
         }
         return $author;
     }
@@ -88,8 +108,12 @@ class AuthorController extends CoreController
      */
     public function update(AuthorRequest $request, $id)
     {
-        $request->id = $id;
-        return $this->updateAuthor($request);
+        try {
+            $request->id = $id;
+            return $this->updateAuthor($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_UPDATE_THE_RESOURCE);
+        }
     }
 
     public function updateAuthor(Request $request)
@@ -98,12 +122,11 @@ class AuthorController extends CoreController
             try {
                 $author = $this->repository->findOrFail($request->id);
             } catch (\Exception $e) {
-                throw new MarvelException(NOT_FOUND);
+                throw new ModelNotFoundException(NOT_FOUND);
             }
             return $this->repository->updateAuthor($request, $author);
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
         }
+        throw new AuthorizationException(NOT_AUTHORIZED);
     }
 
     /**
@@ -112,13 +135,23 @@ class AuthorController extends CoreController
      * @param $id
      * @return JsonResponse
      */
-    public function destroy($id)
+    public function destroy($id, Request $request)
     {
-        try {
-            return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
+       try {
+        $request['id'] = $id;
+        return $this->deleteAuthor($request);
+       } catch (MarvelException $th) {
+        throw new MarvelException(COULD_NOT_DELETE_THE_RESOURCE);
+    }
+    }
+    public function deleteAuthor(Request $request)
+    {
+        if ($request->user()->hasPermissionTo(Permission::SUPER_ADMIN)) {
+            $author = $this->repository->findOrFail($request->id);
+            $author->delete();
+            return $author;
         }
+        throw new MarvelException(NOT_AUTHORIZED);
     }
 
     public function topAuthor(Request $request)

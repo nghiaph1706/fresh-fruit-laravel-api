@@ -17,4 +17,8 @@ class AuthorMutator
     {
         return Shop::call('Marvel\Http\Controllers\AuthorController@updateAuthor', $args);
     }
+    public function deleteAuthor($rootValue, array $args, GraphQLContext $context)
+    {
+        return Shop::call('Marvel\Http\Controllers\AuthorController@deleteAuthor', $args);
+    }
 }

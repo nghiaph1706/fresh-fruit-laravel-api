@@ -59,6 +59,7 @@ input UpdateTypeInput {
     id: ID!
     language: String
     name: String!
+    slug: String
     banners: [BannerInputType]
     promotional_sliders: [AttachmentInput]
     settings: TypeSettingsInput

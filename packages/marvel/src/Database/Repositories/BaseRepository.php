@@ -5,6 +5,7 @@ namespace Marvel\Database\Repositories;
 
 use Exception;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Marvel\Database\Models\Shop;
 use Marvel\Enums\Permission;
 use Marvel\Exceptions\MarvelException;
@@ -203,5 +204,37 @@ abstract class BaseRepository extends Repository implements CacheableInterface
         }
 
         return $data;
+    }
+
+
+    /**
+     * It takes a request object, and a key, and returns a slug.
+     * 
+     * @param Request request The request object
+     * @param string key The key of the request that you want to slugify.
+     * 
+     * @return string A string
+     */
+    public function makeSlug(Request $request, string $key = '', ?int $update = null): string
+    {
+        $slugText = match (true) {
+            !empty($request->slug)  => $request->slug,
+            !empty($request->name)  => $request->name,
+            !empty($request->title) => $request->title,
+            !empty($request[$key])  => $request[$key],
+            empty($request->slug)   => 'auto-generated-string',
+        };
+        if (empty($key)) {
+            return globalSlugify(slugText: $slugText, model: $this->model(), update: $update);
+        }
+        return globalSlugify(slugText: $request[$key], model: $this->model(), key: $key, update: $update);
+    }
+
+    public function findBySlugOrId(int | string $value, string $language = DEFAULT_LANGUAGE)
+    {
+        return match (true) {
+            is_numeric($value) => $this->where('id', $value)->where('language', $language)->firstOrFail(),
+            is_string($value)  => $this->where('slug', $value)->where('language', $language)->firstOrFail(),
+        };
     }
 }

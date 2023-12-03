@@ -3,7 +3,7 @@ extend type Query {
         text: String @where(operator: "like", key: "name")
         is_approved: Boolean @eq
         language: String @eq
-        orderBy: _ @orderBy(columns: ["updated_at", "created_at", "name"])
+        orderBy: _ @orderBy(columns: ["updated_at", "created_at", "name", "id"])
     ): [Author!]! @paginate(defaultCount: 15)
     topAuthors(limit: Int = 15, language: String): [Author!]!
         @field(resolver: "AuthorQuery@topAuthor")
@@ -45,10 +45,10 @@ input CreateAuthorInput {
     cover_image: AttachmentInput
     slug: String
 }
-
 input UpdateAuthorInput {
     id: ID!
     name: String!
+    slug: String!
     language: String
     is_approved: Boolean
     shop_id: ID @rules(apply: ["exists:shops,id"])
@@ -63,9 +63,9 @@ input UpdateAuthorInput {
 }
 
 extend type Mutation {
-    deleteAuthor(id: ID!): Author @delete
-    updateAuthor(input: UpdateAuthorInput! @spread): Author
-        @field(resolver: "AuthorMutator@updateAuthor")
     createAuthor(input: CreateAuthorInput! @spread): Author
         @field(resolver: "AuthorMutator@storeAuthor")
+    updateAuthor(input: UpdateAuthorInput! @spread): Author
+        @field(resolver: "AuthorMutator@updateAuthor")
+    deleteAuthor(id: ID!): Author @field(resolver: "AuthorMutator@deleteAuthor")
 }

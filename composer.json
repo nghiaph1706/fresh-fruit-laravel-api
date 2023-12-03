@@ -1,7 +1,7 @@
 {
     "name": "redq/marvel",
     "type": "project",
-    "description": "Marvel, a complete ecommerce engine for both rest and graphql",
+    "description": "Marvel, a complete e-commerce engine for both rest and graphql",
     "keywords": [
         "marvel",
         "graphql",
@@ -10,36 +10,38 @@
     "license": "MIT",
     "require": {
         "php": "^8.0|^8.1",
-        "barryvdh/laravel-dompdf": "2.0.0",
-        "doctrine/dbal": "3.3.7",
-        "fideloper/proxy": "4.4.2",
-        "fruitcake/laravel-cors": "3.0.0",
-        "guzzlehttp/guzzle": "7.4.5",
-        "laravel/framework": "9.21.0",
-        "laravel/socialite": "5.5.2",
-        "laravel/tinker": "2.7.2",
-        "marvel/shop": "dev-main",
-        "messagebird/php-rest-api": "3.1.2",
+        "barryvdh/laravel-dompdf": "2.0.1",
+        "doctrine/dbal": "3.6.0",
+        "guzzlehttp/guzzle": "7.5.0",
+        "karim007/laravel-bkash-tokenize": "dev-main",
+        "laravel/framework": "10.1.5",
+        "laravel/socialite": "5.6.1",
+        "laravel/tinker": "2.8.1",
+        "marvel/shop": "dev-master",
+        "messagebird/php-rest-api": "3.1.4",
         "psr/log": "2.0.0",
-        "srmklive/paypal": "~3.0",
-        "stevebauman/purify": "^5.0",
-        "symfony/http-client": "6.0.9",
-        "symfony/mailgun-mailer": "6.0.7",
-        "twilio/sdk": "6.40.0"
+        "stevebauman/purify": "5.1.1",
+        "symfony/http-client": "6.2.6",
+        "symfony/mailgun-mailer": "6.2.5",
+        "kingflamez/laravelrave": "dev-master"
     },
     "require-dev": {
-        "spatie/laravel-ignition": "1.3.1",
-        "fakerphp/faker": "1.20.0",
-        "laravel/sail": "1.15.1",
-        "mockery/mockery": "1.5.0",
-        "nunomaduro/collision": "6.2.1",
-        "phpunit/phpunit": "9.5.21",
-        "squizlabs/php_codesniffer": "3.7.1"
+        "fakerphp/faker": "1.21.0",
+        "laravel/sail": "1.21.0",
+        "laravel/telescope": "^4.15",
+        "mockery/mockery": "1.5.1",
+        "nunomaduro/collision": "7.0.5",
+        "phpunit/phpunit": "10.0.13",
+        "spatie/laravel-ignition": "2.0.0",
+        "squizlabs/php_codesniffer": "3.7.2"
     },
     "config": {
         "optimize-autoloader": true,
         "preferred-install": "dist",
-        "sort-packages": true
+        "sort-packages": true,
+        "allow-plugins": {
+            "php-http/discovery": true
+        }
     },
     "extra": {
         "laravel": {
@@ -76,6 +78,14 @@
         "marvel/shop": {
             "type": "path",
             "url": "packages/marvel"
+        },
+        "marvel/bkash": {
+            "type": "vcs",
+            "url": "https://github.com/CodersFaruk/laravel-bkash-tokenize"
+        },
+        "marvel/flutterwave": {
+            "type": "vcs",
+            "url": "https://github.com/CodersFaruk/laravel-flutterwave"
         }
     }
 }

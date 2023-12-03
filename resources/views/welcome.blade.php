@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300&display=swap" rel="stylesheet">
 
 
-    <!-- Styles -->
+    <!-- Styles --->
     <style>
         .welcome {
             display: flex;

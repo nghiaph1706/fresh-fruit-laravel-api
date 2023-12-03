@@ -42,8 +42,12 @@ class AddressController extends CoreController
      */
     public function store(AddressRequest $request)
     {
-        $validatedData = $request->all();
-        return $this->repository->create($validatedData);
+        try {
+            $validatedData = $request->all();
+            return $this->repository->create($validatedData);
+        } catch (MarvelException $e) {
+            throw new MarvelException(COULD_NOT_CREATE_THE_RESOURCE);
+        }
     }
 
     /**
@@ -56,7 +60,7 @@ class AddressController extends CoreController
     {
         try {
             return $this->repository->with('customer')->findOrFail($id);
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -73,8 +77,8 @@ class AddressController extends CoreController
         try {
             $validatedData = $request->all();
             return $this->repository->findOrFail($id)->update($validatedData);
-        } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
+        } catch (MarvelException $e) {
+            throw new MarvelException(COULD_NOT_UPDATE_THE_RESOURCE);
         }
     }
 
@@ -96,7 +100,7 @@ class AddressController extends CoreController
                     return $address->delete();
                 }
             }
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }

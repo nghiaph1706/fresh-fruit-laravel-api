@@ -2,6 +2,7 @@
 
 namespace Marvel\Http\Controllers;
 
+use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
@@ -12,6 +13,9 @@ use Marvel\Http\Requests\UpdateCouponRequest;
 use Marvel\Database\Repositories\CouponRepository;
 use Prettus\Validator\Exceptions\ValidatorException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
+use Throwable;
 
 class CouponController extends CoreController
 {
@@ -55,12 +59,16 @@ class CouponController extends CoreController
     {
         try {
             $language = $request->language ?? DEFAULT_LANGUAGE;
-            if (is_numeric($params)) {
-                $params = (int) $params;
-                return $this->repository->where('id', $params)->firstOrFail();
+            try {
+                if (is_numeric($params)) {
+                    $params = (int) $params;
+                    return $this->repository->where('id', $params)->firstOrFail();
+                }
+                return $this->repository->where('code', $params)->where('language', $language)->firstOrFail();
+            } catch (Throwable $e) {
+                throw new ModelNotFoundException(NOT_FOUND);
             }
-            return $this->repository->where('code', $params)->where('language', $language)->firstOrFail();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -76,13 +84,13 @@ class CouponController extends CoreController
             'code'      => 'required|string',
             'sub_total' => 'required|numeric',
         ]);
-        
+
         $code = $request->code;
         $sub_total = $request->sub_total;
 
         try {
             return $this->repository->verifyCoupon($code, $sub_total);
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -96,8 +104,12 @@ class CouponController extends CoreController
      */
     public function update(UpdateCouponRequest $request, $id)
     {
-        $request->id = $id;
-        return $this->updateCoupon($request);
+        try {
+            $request->id = $id;
+            return $this->updateCoupon($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException();
+        }
     }
 
     /**
@@ -128,8 +140,8 @@ class CouponController extends CoreController
             }
 
             return $this->repository->update($request->only($dataArray), $id);
-        } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
+        } catch (Exception $e) {
+            throw new HttpException(404, NOT_FOUND);
         }
     }
 
@@ -144,7 +156,7 @@ class CouponController extends CoreController
     {
         try {
             return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }

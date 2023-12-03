@@ -4,7 +4,7 @@ extend type Query {
         language: String @eq
         is_approved: Boolean @eq
         hasType: _ @whereHasConditions(columns: ["slug"])
-        orderBy: _ @orderBy(columns: ["updated_at", "created_at", "name"])
+        orderBy: _ @orderBy(columns: ["updated_at", "created_at", "name", "id"])
     ): [Manufacturer!]! @paginate(defaultCount: 15)
     manufacturer(slug: String @eq, language: String @eq): Manufacturer @find
     topManufacturers(limit: Int = 15, language: String): [Manufacturer!]!
@@ -47,6 +47,7 @@ input CreateManufacturerInput {
 input UpdateManufacturerInput {
     id: ID!
     name: String!
+    slug: String!
     type_id: ID! @rules(apply: ["exists:types,id"])
     shop_id: ID @rules(apply: ["exists:shops,id"])
     is_approved: Boolean
@@ -59,9 +60,10 @@ input UpdateManufacturerInput {
 }
 
 extend type Mutation {
-    deleteManufacturer(id: ID!): Manufacturer @delete
     updateManufacturer(input: UpdateManufacturerInput! @spread): Manufacturer
         @field(resolver: "ManufacturerMutator@updateManufacturer")
     createManufacturer(input: CreateManufacturerInput! @spread): Manufacturer
         @field(resolver: "ManufacturerMutator@storeManufacturer")
+    deleteManufacturer(id: ID!): Manufacturer
+        @field(resolver: "ManufacturerMutator@deleteManufacturer")
 }

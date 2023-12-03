@@ -64,7 +64,7 @@ class ResourceController extends CoreController
                 return $this->repository->where('id', $params)->firstOrFail();
             }
             return $this->repository->where('slug', $params)->where('language', $language)->firstOrFail();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -81,7 +81,7 @@ class ResourceController extends CoreController
         try {
             $validatedData = $request->validated();
             return $this->repository->findOrFail($id)->update($validatedData);
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -96,7 +96,7 @@ class ResourceController extends CoreController
     {
         try {
             return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }

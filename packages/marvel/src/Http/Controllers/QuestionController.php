@@ -4,6 +4,7 @@
 namespace Marvel\Http\Controllers;
 
 use Exception;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,8 +14,7 @@ use Marvel\Database\Repositories\QuestionRepository;
 use Marvel\Exceptions\MarvelException;
 use Marvel\Http\Requests\QuestionCreateRequest;
 use Marvel\Http\Requests\QuestionUpdateRequest;
-use Prettus\Validator\Exceptions\ValidatorException;
-
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class QuestionController extends CoreController
 {
@@ -72,12 +72,12 @@ class QuestionController extends CoreController
             $maximumQuestionLimit = isset($settings['options']['maximumQuestionLimit']) ? $settings['options']['maximumQuestionLimit'] : 5;
 
             if ($maximumQuestionLimit <= $productQuestionCount) {
-                abort(400);
+                throw new HttpException(400, MAXIMUM_QUESTION_LIMIT_EXCEEDED);
             }
 
             return $this->repository->storeQuestion($request);
-        } catch (Exception $e) {
-            throw new Exception(MAXIMUM_QUESTION_LIMIT_EXCEEDED);
+        } catch (MarvelException $e) {
+            throw new MarvelException(MAXIMUM_QUESTION_LIMIT_EXCEEDED);
         }
     }
 
@@ -91,7 +91,7 @@ class QuestionController extends CoreController
     {
         try {
             return $this->repository->findOrFail($id);
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -104,11 +104,14 @@ class QuestionController extends CoreController
 
     public function updateQuestion(Request $request)
     {
-        if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
-            $id = $request->id;
-            return $this->repository->updateQuestion($request, $id);
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
+        try {
+            if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
+                $id = $request->id;
+                return $this->repository->updateQuestion($request, $id);
+            }
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_UPDATE_THE_RESOURCE);
         }
     }
 
@@ -122,7 +125,7 @@ class QuestionController extends CoreController
     {
         try {
             return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }

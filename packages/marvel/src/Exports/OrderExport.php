@@ -1,9 +1,11 @@
 <?php
 
 namespace Marvel\Exports;
+
 use Illuminate\Support\Carbon;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\FromCollection;
+use Marvel\Database\Models\Settings;
 use Marvel\Traits\Helper;
 
 class OrderExport implements FromCollection, WithHeadings
@@ -39,34 +41,38 @@ class OrderExport implements FromCollection, WithHeadings
             // $orders = $this->repository->where('parent_id', '<>', NULL)->get();
         }
 
+
         if (empty($orders)) {
             return collect($results);
         }
 
+        $settings = Settings::getData(request()['language'] ?? DEFAULT_LANGUAGE);
+        $currency = $settings->options['currency'] ?? DEFAULT_CURRENCY;
+
         foreach ($orders as $order) {
 
             $results[] = [
-                'id'                 => '#' . $order->id . ' ' . $order->customer->name,
-                'customer_email'     => $order->customer->email,
+                'id'                 => '#' . $order->id . ' ' . ($order?->customer?->name ?? $order?->customer_name),
+                'customer_email'     => $order?->customer?->email ?? "Guest User",
                 'created_at'         => (new Carbon($order->created_at))->format('Y-m-d'),
-                'delivery_time'      => $order->delivery_time,
-                'status'             => $order->orderStatus->name,
-                'tracking_number'    => $order->tracking_number,
-                'shop'               => isset($order->shop) && !empty($order->shop) ? $order->shop->name : NULL,
-                'coupon_id'          => $order->coupon_id,
-                'amount'             => $order->amount,
-                'discount'           => $order->discount,
-                'paid_amount'        => $order->paid_total,
-                'total'              => $order->total,
-                'sales_tax'          => $order->sales_tax,
-                'delivery_fee'       => $order->delivery_fee,
-                'payment_id'         => $order->payment_id,
-                'payment_gateway'    => $order->payment_gateway,
-                'billing_address'    => $this->formatAddress($order->billing_address),
-                'shipping_address'   => $this->formatAddress($order->shipping_address),
-                'customer_contact'   => $order->customer_contact,
-                'customer_name'      => $order->customer_name,
-                'logistics_provider' => $order->logistics_provider
+                'delivery_time'      => $order?->delivery_time,
+                'status'             => $order?->order_status,
+                'tracking_number'    => $order?->tracking_number,
+                'shop'               => $order?->shop?->name,
+                'coupon_id'          => $order?->coupon_id,
+                'amount'             => @money($order?->amount, $currency),
+                'discount'           => @money($order?->discount, $currency),
+                'paid_amount'        => @money($order?->paid_total, $currency),
+                'total'              => @money($order?->total, $currency),
+                'sales_tax'          => @money($order?->sales_tax, $currency),
+                'delivery_fee'       => @money($order?->delivery_fee, $currency),
+                'payment_id'         => $order?->payment_id,
+                'payment_gateway'    => $order?->payment_gateway,
+                'billing_address'    => $this->formatAddress($order?->billing_address),
+                'shipping_address'   => $this->formatAddress($order?->shipping_address),
+                'customer_contact'   => $order?->customer_contact,
+                'customer_name'      => $order?->customer_name,
+                'logistics_provider' => $order?->logistics_provider
             ];
         }
 

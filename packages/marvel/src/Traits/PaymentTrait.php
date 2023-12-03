@@ -13,28 +13,77 @@ use Marvel\Database\Models\PaymentIntent;
 use Marvel\Enums\PaymentGatewayType;
 use Marvel\Events\PaymentMethods;
 use Marvel\Facades\Payment;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 trait PaymentTrait
 {
+    use OrderStatusManagerWithPaymentTrait;
+    /**
+     * attachPaymentIntent
+     *
+     * @param  string $order_tracking_number
+     * @return PaymentIntent
+     */
+    public function attachPaymentIntent($order_tracking_number)
+    {
+        return PaymentIntent::where(function ($query) use ($order_tracking_number) {
+            $query->where('tracking_number', '=', $order_tracking_number)
+                ->orWhere('order_id', '=', $order_tracking_number);
+        })->first();
+    }
+
     /**
      * processPaymentIntent
      *
      * @param  mixed  $request
      * @param  mixed  $settings
      * @return object
-     * @throws MarvelException
+     * @throws Exception
      */
-    public function processPaymentIntent(Request $request, Settings $settings): object
+    public function processPaymentIntent($request, Settings $settings): object
     {
-        $orderTrackingNumber = $request['tracking_number'];
-        $order = $this->fetchOrderByTrackingNumber($orderTrackingNumber);
+        try {
+            $chosen_payment_gateway = '';
+            $is_payment_intent_exists = false;
 
-        $isPaymentIntentExists = $this->paymentIntentExists($orderTrackingNumber, $settings->options['paymentGateway']);
-        if (!$isPaymentIntentExists) {
-            return $this->savePaymentIntent($order, $settings->options['paymentGateway'], $request);
+            $order_tracking_number = $request['tracking_number'];
+            $requested_payment_gateway = $request['payment_gateway'];
+            $order = $this->fetchOrderByTrackingNumber($order_tracking_number);
+            $initial_payment_gateway = $order->payment_gateway;
+
+            if ($requested_payment_gateway !== $initial_payment_gateway) {
+                $chosen_payment_gateway = ucfirst(strtolower($request['payment_gateway']));
+            } else {
+                if (isset($settings->options['paymentGateway'])) {
+                    foreach ($settings->options['paymentGateway'] as $key => $available_gateway) {
+                        if (strtoupper($available_gateway['name']) === $requested_payment_gateway) {
+                            $chosen_payment_gateway = ucfirst($available_gateway['name']);
+                        }
+                    }
+                }
+            }
+
+            if (isset($chosen_payment_gateway) && !empty($chosen_payment_gateway)) {
+                $is_payment_intent_exists = $this->paymentIntentExists($order_tracking_number, $chosen_payment_gateway);
+                if (!$is_payment_intent_exists) {
+
+                    $newPaymentIntent = $this->savePaymentIntent($order, $chosen_payment_gateway, $request);
+
+                    if ($request['recall_gateway'] && isset($newPaymentIntent)) {
+                        $this->deleteOlderPaymentIntent($order_tracking_number, ucfirst(strtolower($order->payment_gateway)));
+                        $this->updateOrderData($initial_payment_gateway, $chosen_payment_gateway, $order);
+                    }
+                    return $newPaymentIntent;
+                }
+            }
+
+            return PaymentIntent::where(function ($query) use ($order_tracking_number) {
+                $query->where('tracking_number', '=', $order_tracking_number)
+                    ->orWhere('order_id', '=', $order_tracking_number);
+            })->where('payment_gateway', '=', ucfirst($chosen_payment_gateway))->first();
+        } catch (\Throwable $e) {
+            throw $e;
         }
-
-        return PaymentIntent::where('tracking_number', '=', $orderTrackingNumber)->orWhere('order_id', '=', $orderTrackingNumber)->where('payment_gateway', '=', strtoupper($settings->options['paymentGateway']))->first();
     }
 
 
@@ -47,7 +96,53 @@ trait PaymentTrait
      */
     public function paymentIntentExists(string $order_tracking_number, string $payment_gateway): bool
     {
-        return PaymentIntent::where('tracking_number', '=', $order_tracking_number)->orWhere('order_id', '=', $order_tracking_number)->where('payment_gateway', '=', strtoupper($payment_gateway))->exists();
+        return PaymentIntent::where(function ($query) use ($order_tracking_number) {
+            $query->where('tracking_number', '=', $order_tracking_number)
+                ->orWhere('order_id', '=', $order_tracking_number);
+        })->where('payment_gateway', '=', ucfirst($payment_gateway))->exists();
+    }
+
+    /**
+     * deleteOlderPaymentIntent
+     *
+     * @param  string $order_tracking_number
+     * @param  string $payment_gateway
+     * @return object
+     */
+    public function deleteOlderPaymentIntent(string $order_tracking_number, string $payment_gateway)
+    {
+        return PaymentIntent::where(function ($query) use ($order_tracking_number) {
+            $query->where('tracking_number', '=', $order_tracking_number)
+                ->orWhere('order_id', '=', $order_tracking_number);
+        })->where('payment_gateway', '=', ucfirst($payment_gateway))->forceDelete();
+    }
+
+
+    /**
+     * updateOrderData
+     *
+     * @param  string $initial_payment_gateway
+     * @param  string $chosen_payment_gateway
+     * @param  object $order
+     * @return void
+     */
+    public function updateOrderData(string $initial_payment_gateway, string $chosen_payment_gateway, object $order): void
+    {
+        $order['altered_payment_gateway'] = $initial_payment_gateway;
+        $order['payment_gateway'] = strtoupper($chosen_payment_gateway);
+        $order->save();
+        try {
+            $children = json_decode($order->children);
+        } catch (\Throwable $th) {
+            $children = $order->children;
+        }
+        if (is_array($children) && count($children)) {
+            foreach ($order->children as $child_order) {
+                $child_order->payment_gateway = strtoupper($chosen_payment_gateway);
+                $child_order->altered_payment_gateway = $initial_payment_gateway;
+                $child_order->save();
+            }
+        }
     }
 
 
@@ -55,7 +150,7 @@ trait PaymentTrait
      * savePaymentIntent
      *
      * @param  mixed $order
-     * @param  mixed $payment_gateway
+     * @param  string $payment_gateway
      * @param  mixed $request
      * @return object
      */
@@ -77,19 +172,28 @@ trait PaymentTrait
      * @param  mixed  $request
      * @param  string $payment_gateway
      * @return array
-     * @throws MarvelException
+     * @throws Exception
      */
     public function createPaymentIntent(Order $order, Request $request, string $payment_gateway): array
     {
-        // Make it automated in future
         $created_intent = [
-            "amount"                => $order->paid_total,
+            "amount"                => $order->paid_total - intval($order?->wallet?->amount),
             "order_tracking_number" => $order->tracking_number,
         ];
+        if ($request->user() !== null) {
+            $created_intent["user_email"] = $order->customer->email;
+        }
 
         if ($request->user() !== null && strtoupper($payment_gateway) === PaymentGatewayType::STRIPE) {
             $customer = $this->createPaymentCustomer($request);
             $created_intent["customer"] = $customer["customer_id"];
+        }
+        if (strtoupper($payment_gateway) === PaymentGatewayType::IYZICO) {
+            $created_intent["ip"] = $request->ip();
+        }
+
+        if (strtoupper($payment_gateway) === PaymentGatewayType::PAYMONGO) {
+            $created_intent['selected_payment_path'] = $request['payment_sub_gateway'];
         }
 
         return Payment::getIntent($created_intent);
@@ -102,12 +206,12 @@ trait PaymentTrait
      * @param  string $tracking_number
      * @return object
      */
-    public function fetchOrderByTrackingNumber($tracking_number)
+    public function fetchOrderByTrackingNumber(string $tracking_number): object
     {
         try {
             return Order::where('id', "=", $tracking_number)->orWhere('tracking_number', $tracking_number)->first();
         } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
+            throw new HttpException(404, NOT_FOUND);
         }
     }
 
@@ -123,37 +227,47 @@ trait PaymentTrait
         // brand & network are equivalent with razorpay & stripe, "network" in marvel DB
         // type & funding are equivalent with razorpay & stripe, "type" in marvel DB
 
-        $settings = Settings::first();
-        $customers_gateway = PaymentGateway::where('user_id', '=', $request->user()->id)->where('gateway_name', '=', $settings->options['paymentGateway'])->first();
+        try {
+            $customers_gateway = PaymentGateway::where('user_id', '=', $request->user()->id)->where('gateway_name', '=', $request->payment_gateway)->first();
 
-        // if first card, then set as default.
-        $default = false;
-        if (is_null(PaymentMethod::first())) {
-            $default = true;
-        } else {
-            $default = $request->default_card;
+            // if first card, then set as default.
+            $default = false;
+            if (is_null(PaymentMethod::first())) {
+                $default = true;
+            } else {
+                $default = $request->default_card;
+            }
+            /* Updating the default card to false if the payment gateway is stripe. */
+            if ($default) {
+                PaymentMethod::where([
+                    "default_card"       => true,
+                    "payment_gateway_id" =>  $customers_gateway->id,
+                ])->update(['default_card' => false]);
+            }
+
+            $payment_method = PaymentMethod::create([
+                'method_key'         => $payment_method->id,
+                "payment_gateway_id" => $customers_gateway->id,
+                "default_card"       => $default,
+                "fingerprint"        => $payment_method->card->fingerprint,
+                "owner_name"         => $payment_method->billing_details->name,
+                "last4"              => $payment_method->card->last4,
+                "expires"            => $payment_method->card->exp_month . "/" . $payment_method->card->exp_year,
+                "network"            => $payment_method->card->brand,
+                "type"               => $payment_method->card->funding,
+                "origin"             => $payment_method->card->country,
+                "verification_check" => $payment_method->card->checks->cvc_check,
+            ]);
+
+            // run a job to check and set default card
+            if ($request->default_card) {
+                event(new PaymentMethods($payment_method));
+            }
+
+            return $payment_method;
+        } catch (\Exception $e) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
         }
-
-        $payment_method = PaymentMethod::create([
-            'method_key'         => $payment_method->id,
-            "payment_gateway_id" => $customers_gateway->id,
-            "default_card"       => $default,
-            "fingerprint"        => $payment_method->card->fingerprint,
-            "owner_name"         => $payment_method->billing_details->name,
-            "last4"              => $payment_method->card->last4,
-            "expires"            => $payment_method->card->exp_month . "/" . $payment_method->card->exp_year,
-            "network"            => $payment_method->card->brand,
-            "type"               => $payment_method->card->funding,
-            "origin"             => $payment_method->card->country,
-            "verification_check" => $payment_method->card->checks->cvc_check,
-        ]);
-
-        // run a job to check and set default card
-        if ($request->default_card) {
-            event(new PaymentMethods($payment_method));
-        }
-
-        return $payment_method;
     }
 
     /**
@@ -165,22 +279,23 @@ trait PaymentTrait
     public function createPaymentCustomer($request)
     {
         try {
-            $settings = Settings::first();
-            if (!$this->customerAlreadyExists($request->user()->id, $settings)) {
+            $selected_payment_gateway = strtoupper($request->payment_gateway);
+
+            if (!$this->customerAlreadyExists($request->user()->id, $selected_payment_gateway)) {
                 $customer = Payment::createCustomer($request);
-                if (in_array(strtoupper($settings->options['paymentGateway']), PaymentGatewayType::getValues())) {
+                if (in_array($selected_payment_gateway, PaymentGatewayType::getValues())) {
                     PaymentGateway::create([
                         'user_id'      => $request->user()->id,
                         'customer_id'  => $customer['customer_id'],
-                        'gateway_name' => $settings->options['paymentGateway']
+                        'gateway_name' => $selected_payment_gateway
                     ]);
                 }
             } else {
-                $customer = PaymentGateway::where('user_id', '=', $request->user()->id)->where('gateway_name', '=', $settings->options['paymentGateway'])->first();
+                $customer = PaymentGateway::where('user_id', '=', $request->user()->id)->where('gateway_name', '=', $selected_payment_gateway)->first();
             }
             return $customer;
         } catch (\Exception $e) {
-            throw new MarvelException(SOMETHING_WENT_WRONG);
+            throw new HttpException(400, SOMETHING_WENT_WRONG);
         }
     }
 
@@ -190,11 +305,11 @@ trait PaymentTrait
      * @param  string $user_id
      * @return boolean
      */
-    public function customerAlreadyExists($user_id, $settings)
+    public function customerAlreadyExists($user_id, $selected_payment_gateway)
     {
         try {
             $customer_exists = false;
-            $customer_exists = PaymentGateway::where('user_id', '=', $user_id)->where('gateway_name', '=', $settings->options['paymentGateway'])->exists();
+            $customer_exists = PaymentGateway::where('user_id', '=', $user_id)->where('gateway_name', '=', $selected_payment_gateway)->exists();
             if ($customer_exists) {
                 return true;
             }
@@ -234,6 +349,9 @@ trait PaymentTrait
      */
     public function webhookSuccessResponse($order, $order_status, $payment_status)
     {
+        $isFinal = $this->checkOrderStatusIsFinal($order);
+        if ($isFinal) return;
+
         $order->order_status = $order_status;
         $order->payment_status = $payment_status;
         $order->save();

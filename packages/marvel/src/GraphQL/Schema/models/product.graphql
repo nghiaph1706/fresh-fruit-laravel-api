@@ -6,6 +6,10 @@ extend type Query {
         sortedBy: String
         language: String
         searchJoin: String = "AND"
+        product_type: String
+        flash_sale_builder: Boolean
+        status: String
+        shop_id: String
     ): [Product]
         @paginate(
             builder: "Marvel\\GraphQL\\Queries\\ProductQuery@fetchProducts"
@@ -44,10 +48,44 @@ extend type Query {
     #     @paginate(defaultCount: 15)
     #     @orderBy(column: "created_at", direction: "DESC")
     product(id: ID @eq, slug: String @eq, language: String @eq): Product @find
+
+    productsStock(
+        language: String!
+        searchJoin: String = "and"
+        search: String
+        name: String
+        type_id: ID
+        shop_id: ID
+        orderBy: String
+        sortedBy: String
+    ): [Product!]!
+        @paginate(
+            builder: "Marvel\\GraphQL\\Queries\\ProductQuery@fetchProductStock"
+            defaultCount: 15
+        )
+
+    productsDraft(
+        language: String!
+        searchJoin: String = "and"
+        search: String
+        name: String
+        type_id: ID
+        shop_id: ID
+        orderBy: String
+        sortedBy: String
+    ): [Product!]!
+        @paginate(
+            builder: "Marvel\\GraphQL\\Queries\\ProductQuery@fetchDraftedProducts"
+            defaultCount: 15
+        )
 }
 
 enum ProductStatus {
+    UNDER_REVIEW @enum(value: "under_review")
+    APPROVED @enum(value: "approved")
+    REJECTED @enum(value: "rejected")
     PUBLISH @enum(value: "publish")
+    UNPUBLISH @enum(value: "unpublish")
     DRAFT @enum(value: "draft")
 }
 
@@ -79,6 +117,7 @@ type Variation {
     is_digital: Boolean
     sale_price: Float
     quantity: Int
+    sold_quantity: Int
     options: [VariationOption]
 }
 
@@ -108,6 +147,10 @@ type MetaData {
 type RatingCount {
     rating: Int
     total: Int
+}
+
+type Video {
+    url: String
 }
 
 type Product {
@@ -158,7 +201,7 @@ type Product {
     sku: String
     gallery: [Attachment]
     image: Attachment
-    video: Attachment
+    video: [Video]
     status: ProductStatus!
     height: String
     length: String
@@ -166,6 +209,8 @@ type Product {
     price: Float
     quantity: Int
     unit: String!
+    sold_quantity: Int
+    in_flash_sale: Int
     created_at: DateTime
     updated_at: DateTime
 }
@@ -179,6 +224,9 @@ input DigitalFileInput {
     id: ID
     attachment_id: ID!
     url: String!
+}
+input VideoInput {
+    url: String
 }
 
 input VariationInput {
@@ -218,7 +266,7 @@ input CreateProductInput {
     slug: String
     name: String! @rules(apply: ["required", "max:255"])
     type_id: ID! @rules(apply: ["required", "exists:types,id"])
-    shop_id: ID! @rules(apply: ["exists:shops,id"])
+    shop_id: ID! @rules(apply: ["required", "exists:shops,id"])
     author_id: ID @rules(apply: ["exists:authors,id"])
     manufacturer_id: ID @rules(apply: ["exists:manufacturers,id"])
     price: Float
@@ -228,9 +276,9 @@ input CreateProductInput {
     min_price: Float
     sale_price: Float
     quantity: Int
-    product_type: ProductType!
+    product_type: ProductType! @rules(apply: ["required"])
     unit: String! @rules(apply: ["required"])
-    description: String @rules(apply: ["max:1000"])
+    description: String @rules(apply: ["max:10000"])
     categories: [ID!]
     tags: [ID!]
     digital_file: DigitalFileInput
@@ -246,7 +294,7 @@ input CreateProductInput {
     sku: String
     gallery: [AttachmentInput]
     image: AttachmentInput
-    video: AttachmentInput
+    video: [VideoInput]
     status: ProductStatus
     height: String
     length: String
@@ -255,10 +303,10 @@ input CreateProductInput {
 
 input UpdateProductInput {
     id: ID! @rules(apply: ["required"])
-    name: String!
+    name: String! @rules(apply: ["required", "max:255"])
     slug: String
     type_id: ID! @rules(apply: ["required", "exists:types,id"])
-    shop_id: ID! @rules(apply: ["exists:shops,id"])
+    shop_id: ID! @rules(apply: ["required", "exists:shops,id"])
     author_id: ID @rules(apply: ["exists:authors,id"])
     manufacturer_id: ID @rules(apply: ["exists:manufacturers,id"])
     price: Float
@@ -267,9 +315,9 @@ input UpdateProductInput {
     metas: [MetaInput]
     language: String
     quantity: Int
-    product_type: ProductType!
+    product_type: ProductType! @rules(apply: ["required"])
     unit: String! @rules(apply: ["required"])
-    description: String @rules(apply: ["max:1000"])
+    description: String @rules(apply: ["max:10000"])
     categories: [ID!]
     tags: [ID!]
     digital_file: DigitalFileInput
@@ -285,7 +333,7 @@ input UpdateProductInput {
     sku: String
     gallery: [AttachmentInput]
     image: AttachmentInput
-    video: AttachmentInput
+    video: [VideoInput]
     status: ProductStatus!
     height: String
     length: String
@@ -315,7 +363,7 @@ type PriceBreakdown {
 }
 
 extend type Mutation {
-    deleteProduct(id: ID!): Product @delete @can(ability: "staff")
+    deleteProduct(id: ID!): Product @field(resolver: "ProductMutator@destroy")
     createProduct(input: CreateProductInput! @spread): Product
         @field(resolver: "ProductMutator@store")
     updateProduct(input: UpdateProductInput! @spread): Product

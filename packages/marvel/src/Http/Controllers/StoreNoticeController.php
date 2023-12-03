@@ -3,6 +3,7 @@
 namespace Marvel\Http\Controllers;
 
 use Exception;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -10,11 +11,15 @@ use Illuminate\Support\Collection;
 use Marvel\Database\Models\StoreNotice;
 use Marvel\Database\Repositories\StoreNoticeReadRepository;
 use Marvel\Database\Repositories\StoreNoticeRepository;
+use Marvel\Enums\Permission;
 use Marvel\Enums\StoreNoticeType;
 use Marvel\Exceptions\MarvelException;
 use Marvel\Http\Requests\StoreNoticeRequest;
 use Marvel\Http\Requests\StoreNoticeUpdateRequest;
+use Marvel\Http\Resources\GetSingleStoreNoticeResource;
+use Marvel\Http\Resources\StoreNoticeResource;
 use Prettus\Validator\Exceptions\ValidatorException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class StoreNoticeController extends CoreController
 {
@@ -34,17 +39,14 @@ class StoreNoticeController extends CoreController
      */
     public function index(Request $request)
     {
-        if (!$request->user() && !$request['shop_id']) {
-            return response(
-                [
-                    'errors'  => 'shop_id is missing',
-                    'message' => NOT_AUTHORIZED
-                ],
-                401
-            );
+        try {
+            $limit = $request->limit ? $request->limit : 15;
+            $storeNotices = $this->fetchStoreNotices($request)->paginate($limit);
+            $data = StoreNoticeResource::collection($storeNotices)->response()->getData(true);
+            return formatAPIResourcePaginate($data);
+        } catch (MarvelException $th) {
+            throw new MarvelException(SOMETHING_WENT_WRONG, $th->getMessage());
         }
-        $limit = $request->limit ? $request->limit : 15;
-        return $this->fetchStoreNotices($request)->paginate($limit);
     }
 
     /**
@@ -54,7 +56,7 @@ class StoreNoticeController extends CoreController
      */
     public function fetchStoreNotices(Request $request)
     {
-        return $this->repository->fetchStoreNotices($request);
+        return $this->repository->whereNotNull('id');
     }
 
     /**
@@ -66,7 +68,14 @@ class StoreNoticeController extends CoreController
      */
     public function store(StoreNoticeRequest $request)
     {
-        return $this->repository->saveStoreNotice($request);
+        try {
+            if ($request->user()->hasPermissionTo(Permission::SUPER_ADMIN) || $this->repository->hasPermission($request->user(), $request->received_by[0] ?? 0)) {
+                return $this->repository->saveStoreNotice($request);
+            }
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $th) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
+        }
     }
 
     /**
@@ -88,7 +97,7 @@ class StoreNoticeController extends CoreController
     {
         $typeArr = array(StoreNoticeType::ALL_SHOP, StoreNoticeType::ALL_VENDOR);
         if (in_array($request->type, $typeArr)) {
-            throw new MarvelException(ACTION_NOT_VALID);
+            throw new HttpException(400, ACTION_NOT_VALID);
         }
         return $this->repository->fetchUserToSendNotification($request);
     }
@@ -103,9 +112,11 @@ class StoreNoticeController extends CoreController
     public function show(Request $request, $id)
     {
         try {
-            return $this->repository->findOrFail($id);
-        } catch (Exception $e) {
-            return response(['message' =>NOT_FOUND], 404);
+            $storeNotice = $this->repository->findOrFail($id);
+            // return $storeNotice;
+            return new GetSingleStoreNoticeResource($storeNotice);
+        } catch (MarvelException $th) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
         }
     }
 
@@ -119,8 +130,12 @@ class StoreNoticeController extends CoreController
      */
     public function update(StoreNoticeUpdateRequest $request, $id)
     {
-        $request['id'] = $id;
-        return $this->updateStoreNotice($request);
+        try {
+            $request['id'] = $id;
+            return $this->updateStoreNotice($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
+        }
     }
 
     /**
@@ -134,16 +149,13 @@ class StoreNoticeController extends CoreController
     {
         $id = $request->id;
         try {
-            $storeNotice = $this->repository->findOrFail($id);
-            $permissionArr = $storeNotice->creator->getPermissionNames();
-
-            if (!$request->user()->hasAllPermissions($permissionArr)) {
-                return response()->json(['message' => NOT_AUTHORIZED], 403);
+            if ($request->user()->hasPermissionTo(Permission::SUPER_ADMIN) || $this->repository->hasPermission($request->user(), $request->received_by[0] ?? 0)) {
+                $storeNotice = $this->repository->findOrFail($id);
+                return $this->repository->updateStoreNotice($request, $storeNotice);
             }
-            return $this->repository->updateStoreNotice($request, $storeNotice);
+            throw new AuthorizationException(NOT_AUTHORIZED);
         } catch (Exception $e) {
-            return response()->json(['message' => NOT_FOUND], 404);
-            throw new MarvelException(NOT_FOUND);
+            throw new HttpException(400, COULD_NOT_DELETE_THE_RESOURCE);
         }
     }
 
@@ -157,8 +169,12 @@ class StoreNoticeController extends CoreController
     public function destroy(Request $request, $id)
     {
 
-        $request['id'] = $id ?? 0;
-        return $this->deleteStoreNotice($request);
+        try {
+            $request['id'] = $id ?? 0;
+            return $this->deleteStoreNotice($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_DELETE_THE_RESOURCE);
+        }
     }
 
     /**
@@ -173,8 +189,7 @@ class StoreNoticeController extends CoreController
             $id = $request->id;
             return $this->repository->findOrFail($id)->forceDelete();
         } catch (Exception $e) {
-            return response()->json(['message' => NOT_FOUND], 404);
-            throw new MarvelException(NOT_FOUND);
+            throw new HttpException(400, COULD_NOT_DELETE_THE_RESOURCE);
         }
     }
 
@@ -187,10 +202,14 @@ class StoreNoticeController extends CoreController
      */
     public function readNotice(Request $request)
     {
-        $request->validate([
-            'id' => 'required|exists:Marvel\Database\Models\StoreNotice,id'
-        ]);
-        return $this->repositoryPivot->readSingleNotice($request);
+        try {
+            $request->validate([
+                'id' => 'required|exists:Marvel\Database\Models\StoreNotice,id'
+            ]);
+            return $this->repositoryPivot->readSingleNotice($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
+        }
     }
 
     /**
@@ -202,10 +221,14 @@ class StoreNoticeController extends CoreController
      */
     public function readAllNotice(Request $request)
     {
-        $request->validate([
-            'notices' => 'required|array|min:1',
-            'notices.*' => 'exists:Marvel\Database\Models\StoreNotice,id',
-        ]);
-        return $this->repositoryPivot->readAllNotice($request);
+        try {
+            $request->validate([
+                'notices' => 'required|array|min:1',
+                'notices.*' => 'exists:Marvel\Database\Models\StoreNotice,id',
+            ]);
+            return $this->repositoryPivot->readAllNotice($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
+        }
     }
 }

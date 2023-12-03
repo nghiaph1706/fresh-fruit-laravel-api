@@ -6,22 +6,24 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
+use Illuminate\Support\Facades\App;
 use Marvel\Database\Models\Order;
+use niklasravnsborg\LaravelPdf\Facades\Pdf as PDF;
 
 class OrderPlacedSuccessfully extends Notification implements ShouldQueue
 {
     use Queueable;
 
-    protected $order;
+    protected array $invoiceData;
 
     /**
      * Create a new notification instance.
      *
      * @return void
      */
-    public function __construct(Order $order)
+    public function __construct(array $invoiceData)
     {
-        $this->order = $order;
+        $this->invoiceData = $invoiceData;
     }
 
     /**
@@ -43,9 +45,15 @@ class OrderPlacedSuccessfully extends Notification implements ShouldQueue
      */
     public function toMail($notifiable)
     {
+        App::setLocale($this->invoiceData['language'] ?? DEFAULT_LANGUAGE);
+        $invoiceData = $this->invoiceData;
+        $pdf = PDF::loadView('pdf.order-invoice', $invoiceData);
+
+
         return (new MailMessage)
-            ->subject('Order Placed Successfully')
-            ->markdown('emails.order.placed', ['order' => $this->order, 'url' => config('shop.shop_url') . '/orders/' . $this->order->tracking_number]);
+            ->subject(__('sms.order.orderCreated.customer.subject'))
+            ->markdown('emails.order.order-invoice',  $invoiceData)
+            ->attachData($pdf->output(), 'invoice.pdf');
     }
 
     /**

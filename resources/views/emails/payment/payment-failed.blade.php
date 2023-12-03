@@ -1,15 +1,14 @@
 {{--$order collection is available here--}}
 
 @component('mail::message')
-# Payment was falied!
+# {{ __('sms.order.paymentFailedOrder.admin.subject') }}
 
-Payment was falied. Please contact with respected authority.
-Order tracking id {{$order->tracking_number}}
+{{ __('sms.order.paymentFailedOrder.admin.message',['ORDER_TRACKING_NUMBER'=>$order->tracking_number]) }}
 
 @component('mail::button', ['url' => $url ])
-View Order
+    {{__('common.view-order')}}
 @endcomponent
 
-Thanks,<br>
+{{__('common.thanks')}},<br>
 {{ config('app.name') }}
 @endcomponent

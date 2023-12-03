@@ -184,7 +184,7 @@ return [
         'interfaces' => 'App\\GraphQL\\Interfaces',
         'unions' => 'App\\GraphQL\\Unions',
         'scalars' => 'App\\GraphQL\\Scalars',
-        'directives' => ['App\\GraphQL\\Directives'],
+        'directives' => ['App\\GraphQL\\Directives', 'Marvel\\GraphQL\\Directives'],
         'validators' => ['App\\GraphQL\\Validators'],
     ],
 

@@ -6,6 +6,7 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Validation\Rule;
+use Marvel\Enums\ProductStatus;
 use Marvel\Enums\ProductType;
 
 class ProductUpdateRequest extends FormRequest
@@ -27,6 +28,19 @@ class ProductUpdateRequest extends FormRequest
      */
     public function rules()
     {
+        $productStatus = [
+            ProductStatus::UNDER_REVIEW,
+            ProductStatus::APPROVED,
+            ProductStatus::REJECTED,
+            ProductStatus::PUBLISH,
+            ProductStatus::UNPUBLISH,
+            ProductStatus::DRAFT,
+        ];
+
+        $productType = [
+            ProductType::SIMPLE,
+            ProductType::VARIABLE
+        ];
         return [
             'name'                         => ['string', 'max:255'],
             'price'                        => ['nullable', 'numeric'],
@@ -41,15 +55,15 @@ class ProductUpdateRequest extends FormRequest
             'pickup_locations'             => ['array'],
             'language'                     => ['nullable', 'string'],
             'digital_file'                 => ['array'],
-            'product_type'                 => [Rule::in([ProductType::SIMPLE, ProductType::VARIABLE])],
+            'product_type'                 => ['required', Rule::in($productType)],
             'unit'                         => ['string'],
             'description'                  => ['nullable', 'string'],
             'quantity'                     => ['nullable', 'integer'],
-            'sku'                          => ['string'],
+            'sku'                          => ['string', Rule::unique('variation_options')->where(fn ($query) => $query->whereSku($this->sku))],
             'image'                        => ['array'],
             'gallery'                      => ['array'],
             'video'                        => ['array'],
-            'status'                       => ['string', Rule::in(['publish', 'draft'])],
+            'status'                       => ['string', Rule::in($productStatus)],
             'height'                       => ['nullable', 'string'],
             'length'                       => ['nullable', 'string'],
             'width'                        => ['nullable', 'string'],

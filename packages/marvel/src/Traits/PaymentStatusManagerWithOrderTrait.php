@@ -28,9 +28,18 @@ trait PaymentStatusManagerWithOrderTrait
         try {
             $chosen_intent = '';
             // for single gateway options
+            // if (isset($order->payment_intent)) {
+            //     foreach ($order->payment_intent as $key => $intent) {
+            //         if (strtoupper($settings->options['paymentGateway']) === $order->payment_gateway) {
+            //             $chosen_intent = $intent;
+            //         }
+            //     }
+            // }
+
+            // for multi-gateway options
             if (isset($order->payment_intent)) {
                 foreach ($order->payment_intent as $key => $intent) {
-                    if (strtoupper($settings->options['paymentGateway']) === $order->payment_gateway) {
+                    if (strtoupper($request['payment_gateway']) === $order->payment_gateway) {
                         $chosen_intent = $intent;
                     }
                 }
@@ -71,14 +80,16 @@ trait PaymentStatusManagerWithOrderTrait
     {
         try {
             $chosen_intent = '';
-            // for single gateway options
+
+            // for multi-gateway options
             if (isset($order->payment_intent)) {
                 foreach ($order->payment_intent as $key => $intent) {
-                    if (strtoupper($settings->options['paymentGateway']) === $order->payment_gateway) {
+                    if (strtoupper($request['payment_gateway']) === $order->payment_gateway) {
                         $chosen_intent = $intent;
                     }
                 }
             }
+
 
             $paymentId = isset($chosen_intent->payment_intent_info) ? $chosen_intent->payment_intent_info['payment_id'] : null;
             if (isset($paymentId)) {
@@ -109,10 +120,11 @@ trait PaymentStatusManagerWithOrderTrait
     {
         try {
             $chosen_intent = '';
-            // for single gateway options
+
+            // for multi-gateway options
             if (isset($order->payment_intent)) {
                 foreach ($order->payment_intent as $key => $intent) {
-                    if (strtoupper($settings->options['paymentGateway']) === $order->payment_gateway) {
+                    if (strtoupper($request['payment_gateway']) === $order->payment_gateway) {
                         $chosen_intent = $intent;
                     }
                 }
@@ -149,10 +161,11 @@ trait PaymentStatusManagerWithOrderTrait
     {
         try {
             $chosen_intent = '';
-            // for single gateway options
+
+            // for multi-gateway options
             if (isset($order->payment_intent)) {
                 foreach ($order->payment_intent as $key => $intent) {
-                    if (strtoupper($settings->options['paymentGateway']) === $order->payment_gateway) {
+                    if (ucfirst($request['payment_gateway']) === $intent->payment_gateway) {
                         $chosen_intent = $intent;
                     }
                 }
@@ -178,7 +191,264 @@ trait PaymentStatusManagerWithOrderTrait
             throw new Exception(SOMETHING_WENT_WRONG_WITH_PAYMENT);
         }
     }
+    public function sslcommerz(Order $order, Request $request, Settings $settings): void
+    {
+        try {
+            $chosen_intent = '';
 
+            // for multi-gateway options
+            if (isset($order->payment_intent)) {
+                foreach ($order->payment_intent as $key => $intent) {
+                    if (strtoupper($request['payment_gateway']) === $order->payment_gateway) {
+                        $chosen_intent = $intent;
+                    }
+                }
+            }
+
+            $paymentId = isset($chosen_intent->payment_intent_info) ? $chosen_intent->payment_intent_info['payment_id'] : null;
+            if (isset($paymentId)) {
+                $paymentStatus = Payment::verify($paymentId);
+                if ($paymentStatus) {
+                    switch (strtolower($paymentStatus)) {
+                        case "valid":
+                            $this->paymentSuccess($order);
+                            break;
+                        case "validated":
+                            $this->paymentSuccess($order);
+                            break;
+                        case "pending":
+                            $this->paymentAwaitingForApproval($order);
+                            break;
+                        case "failed":
+                            $this->paymentFailed($order);
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            throw new Exception(SOMETHING_WENT_WRONG_WITH_PAYMENT);
+        }
+    }
+
+    /**
+     * Status change for paystack
+     *
+     * @throws Exception
+     */
+    public function paystack(Order $order, Request $request, Settings $settings): void
+    {
+        try {
+            $chosen_intent = '';
+
+            // for multi-gateway options
+            if (isset($order->payment_intent)) {
+                foreach ($order->payment_intent as $key => $intent) {
+                    if (strtoupper($request['payment_gateway']) === $order->payment_gateway) {
+                        $chosen_intent = $intent;
+                    }
+                }
+            }
+
+            $paymentId = isset($chosen_intent->payment_intent_info) ? $chosen_intent->payment_intent_info['payment_id'] : null;
+            if (isset($paymentId)) {
+                $paymentStatus = Payment::verify($paymentId);
+                if ($paymentStatus) {
+                    switch (strtolower($paymentStatus)) {
+                        case "success":
+                            $this->paymentSuccess($order);
+                            break;
+                        case "failed":
+                            $this->paymentFailed($order);
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            throw new Exception(SOMETHING_WENT_WRONG_WITH_PAYMENT);
+        }
+    }
+    public function iyzico(Order $order, Request $request, Settings $settings): void
+    {
+        try {
+            $chosen_intent = '';
+            // for multi-gateway options
+            if (isset($order->payment_intent)) {
+                foreach ($order->payment_intent as $key => $intent) {
+                    if (strtoupper($request['payment_gateway']) === $order->payment_gateway) {
+                        $chosen_intent = $intent;
+                    }
+                }
+            }
+
+            $paymentId = isset($chosen_intent->payment_intent_info) ? $chosen_intent->payment_intent_info['payment_id'] : null;
+            if (isset($paymentId)) {
+                $paymentStatus = Payment::verify($paymentId);
+                if ($paymentStatus) {
+                    switch (strtolower($paymentStatus)) {
+                        case "success":
+                            $this->paymentSuccess($order);
+                            break;
+                        case "failed":
+                            $this->paymentFailed($order);
+                        case "init_threeds":
+                            $this->paymentProcessing($order);
+                        case "callback_threeds":
+                            $this->paymentProcessing($order);
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            throw new Exception(SOMETHING_WENT_WRONG_WITH_PAYMENT);
+        }
+    }
+
+    /**
+     * Status change for xendit
+     *
+     * @throws Exception
+     */
+    public function xendit(Order $order, Request $request, Settings $settings): void
+    {
+        try {
+            $chosen_intent = '';
+            // for multi-gateway options
+            if (isset($order->payment_intent)) {
+                foreach ($order->payment_intent as $key => $intent) {
+                    if (strtoupper($request['payment_gateway']) === $order->payment_gateway) {
+                        $chosen_intent = $intent;
+                    }
+                }
+            }
+
+            $paymentId = isset($chosen_intent->payment_intent_info) ? $chosen_intent->payment_intent_info['payment_id'] : null;
+            if (isset($paymentId)) {
+                $paymentStatus = Payment::verify($paymentId);
+                if ($paymentStatus) {
+                    switch (strtolower($paymentStatus)) {
+                        case "paid":
+                            $this->paymentSuccess($order);
+                            break;
+                        case "failed":
+                            $this->paymentFailed($order);
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            throw new Exception(SOMETHING_WENT_WRONG_WITH_PAYMENT);
+        }
+    }
+
+    /**
+     * Status change for bkash
+     *
+     * @throws Exception
+     */
+    public function bkash(Order $order, Request $request, Settings $settings): void
+    {
+        try {
+            $chosen_intent = '';
+            // for multi-gateway options
+            if (isset($order->payment_intent)) {
+                foreach ($order->payment_intent as $key => $intent) {
+                    if (strtoupper($request['payment_gateway']) === $order->payment_gateway) {
+                        $chosen_intent = $intent;
+                    }
+                }
+            }
+
+            $paymentId = isset($chosen_intent->payment_intent_info) ? $chosen_intent->payment_intent_info['payment_id'] : null;
+            if (isset($paymentId)) {
+                $paymentStatus = Payment::verify($paymentId);
+                if ($paymentStatus) {
+                    switch (strtolower($paymentStatus)) {
+                        case "completed":
+                            $this->paymentSuccess($order);
+                            break;
+                        case "failed":
+                            $this->paymentFailed($order);
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            throw new Exception(SOMETHING_WENT_WRONG_WITH_PAYMENT);
+        }
+    }
+
+    /**
+     * Status change for paymongo
+     *
+     * @throws Exception
+     */
+    public function paymongo(Order $order, Request $request, Settings $settings): void
+    {
+        try {
+            $chosen_intent = '';
+            // for multi-gateway options
+            if (isset($order->payment_intent)) {
+                foreach ($order->payment_intent as $key => $intent) {
+                    if (strtoupper($request['payment_gateway']) === $order->payment_gateway) {
+                        $chosen_intent = $intent;
+                    }
+                }
+            }
+
+            $paymentId = isset($chosen_intent->payment_intent_info) ? $chosen_intent->payment_intent_info['payment_id'] : null;
+            if (isset($paymentId)) {
+                $paymentStatus = Payment::verify($paymentId);
+                if ($paymentStatus) {
+                    switch (strtolower($paymentStatus)) {
+                        case "paid":
+                            $this->paymentSuccess($order);
+                            break;
+                        case "chargeable":
+                            $this->paymentAwaitingForApproval($order);
+                            break;
+                        case "pending":
+                            $this->paymentAwaitingForApproval($order);
+                            break;
+                        case "failed":
+                            $this->paymentFailed($order);
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            throw new Exception(SOMETHING_WENT_WRONG_WITH_PAYMENT . $e->getMessage());
+        }
+    }
+
+    /**
+     * Status change for flutterwave
+     *
+     * @throws Exception
+     */
+    public function flutterwave(Order $order, Request $request, Settings $settings): void
+    {
+        try {
+            $chosen_intent = '';
+             // for multi-gateway options
+             if (isset($order->payment_intent)) {
+                foreach ($order->payment_intent as $key => $intent) {
+                    if (strtoupper($request['payment_gateway']) === $order->payment_gateway) {
+                        $chosen_intent = $intent;
+                    }
+                }
+            }
+
+            $paymentId = isset($chosen_intent->payment_intent_info) ? $chosen_intent->payment_intent_info['payment_id'] : null;
+            if (isset($paymentId)) {
+                $paymentStatus = Payment::verify($paymentId);
+                if ($paymentStatus) {
+                    switch (strtolower($paymentStatus)) {
+                        case "successful":
+                            $this->paymentSuccess($order);
+                            break;
+                        case "failed":
+                            $this->paymentFailed($order);
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            throw new Exception(SOMETHING_WENT_WRONG_WITH_PAYMENT);
+        }
+    }
 
     /**
      * Update DB status after payment success

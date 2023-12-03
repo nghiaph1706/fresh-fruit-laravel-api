@@ -3,7 +3,7 @@
 
 namespace Marvel\Http\Controllers;
 
-use Exception;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,7 +16,8 @@ use Marvel\Exceptions\MarvelException;
 use Marvel\Http\Requests\UpdateWithdrawRequest;
 use Marvel\Http\Requests\WithdrawRequest;
 use Prettus\Validator\Exceptions\ValidatorException;
-
+use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class WithdrawController extends CoreController
 {
@@ -41,22 +42,27 @@ class WithdrawController extends CoreController
 
     public function fetchWithdraws(Request $request)
     {
-        $user = $request->user();
-        $shop_id = isset($request['shop_id']) && $request['shop_id'] != 'undefined' ? $request['shop_id'] : false;
-        if ($shop_id) {
-            if ($user->shops->contains('id', $shop_id)) {
-                return $this->repository->with(['shop'])->where('shop_id', '=', $shop_id);
-            } elseif ($user && $user->hasPermissionTo(Permission::SUPER_ADMIN)) {
-                return $this->repository->with(['shop'])->where('shop_id', '=', $shop_id);
+
+        try {
+            $user = $request->user();
+            $shop_id = isset($request['shop_id']) && $request['shop_id'] != 'undefined' ? $request['shop_id'] : false;
+            if ($shop_id) {
+                if ($user->shops->contains('id', $shop_id)) {
+                    return $this->repository->with(['shop'])->where('shop_id', '=', $shop_id);
+                } elseif ($user && $user->hasPermissionTo(Permission::SUPER_ADMIN)) {
+                    return $this->repository->with(['shop'])->where('shop_id', '=', $shop_id);
+                } else {
+                    throw new AuthorizationException(NOT_AUTHORIZED);
+                }
             } else {
-                throw new MarvelException(NOT_AUTHORIZED);
+                if ($user && $user->hasPermissionTo(Permission::SUPER_ADMIN)) {
+                    return $this->repository->with(['shop'])->where('id', '!=', null);
+                } else {
+                    throw new AuthorizationException(NOT_AUTHORIZED);
+                }
             }
-        } else {
-            if ($user && $user->hasPermissionTo(Permission::SUPER_ADMIN)) {
-                return $this->repository->with(['shop'])->where('id', '!=', null);
-            } else {
-                throw new MarvelException(NOT_AUTHORIZED);
-            }
+        } catch (MarvelException $e) {
+            throw new MarvelException($e->getMessage());
         }
     }
 
@@ -69,22 +75,26 @@ class WithdrawController extends CoreController
      */
     public function store(WithdrawRequest $request)
     {
-        $validatedData = $request->validated();
-        if (isset($validatedData['shop_id'])) {
-            $balance = Balance::where('shop_id', '=', $validatedData['shop_id'])->first();
-            if (isset($balance->current_balance) && $balance->current_balance >= $validatedData['amount']) {
+        try {
+            if ($request->user() && ($request->user()->hasPermissionTo(Permission::SUPER_ADMIN) || $request->user()->shops->contains('id', $request->shop_id))) {
+                $validatedData = $request->validated();
+                if (!isset($validatedData['shop_id'])) {
+                    throw new BadRequestHttpException(WITHDRAW_MUST_BE_ATTACHED_TO_SHOP);
+                }
+                $balance = Balance::where('shop_id', '=', $validatedData['shop_id'])->first();
+                if (isset($balance->current_balance) && $balance->current_balance <= $validatedData['amount']) {
+                    throw new BadRequestHttpException(INSUFFICIENT_BALANCE);
+                }
                 $withdraw = $this->repository->create($validatedData);
                 $balance->withdrawn_amount = $balance->withdrawn_amount + $validatedData['amount'];
                 $balance->current_balance = $balance->current_balance - $validatedData['amount'];
                 $balance->save();
                 $withdraw->status = WithdrawStatus::PENDING;
-                $withdraw->shop = $withdraw->shop;
                 return $withdraw;
-            } else {
-                throw new MarvelException(INSUFFICIENT_BALANCE);
             }
-        } else {
-            throw new MarvelException(WITHDRAW_MUST_BE_ATTACHED_TO_SHOP);
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $e) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
         }
     }
 
@@ -102,16 +112,15 @@ class WithdrawController extends CoreController
 
     public function fetchSingleWithdraw(Request $request)
     {
-        $id = $request->id;
         try {
+            $id = $request->id;
             $withdraw = $this->repository->with(['shop'])->findOrFail($id);
-        } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
-        }
-        if ($request->user() && ($request->user()->hasPermissionTo(Permission::SUPER_ADMIN) || $request->user()->shops->contains('id', $withdraw->shop_id))) {
-            return $withdraw;
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
+            if ($request->user() && ($request->user()->hasPermissionTo(Permission::SUPER_ADMIN) || $request->user()->shops->contains('id', $withdraw->shop_id))) {
+                return $withdraw;
+            }
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $e) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
         }
     }
 
@@ -124,7 +133,7 @@ class WithdrawController extends CoreController
      */
     public function update(UpdateWithdrawRequest $request, $id)
     {
-        throw new MarvelException(ACTION_NOT_VALID);
+        throw new HttpException(400, ACTION_NOT_VALID);
     }
 
     /**
@@ -135,31 +144,30 @@ class WithdrawController extends CoreController
      */
     public function destroy(Request $request, $id)
     {
-        if ($request->user() && $request->user()->hasPermissionTo(Permission::SUPER_ADMIN)) {
-            try {
+        try {
+            if ($request->user() && $request->user()->hasPermissionTo(Permission::SUPER_ADMIN)) {
                 return $this->repository->findOrFail($id)->delete();
-            } catch (\Exception $e) {
-                throw new MarvelException(NOT_FOUND);
             }
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $e) {
+            throw new MarvelException(COULD_NOT_DELETE_THE_RESOURCE);
         }
     }
 
     public function approveWithdraw(Request $request)
     {
-        $id = $request->id;
-        $status = $request->status->value ?? $request->status;
         try {
-            $withdraw = $this->repository->findOrFail($id);
-        } catch (Exception $e) {
-            throw new MarvelException(NOT_FOUND);
+            if ($request->user() && $request->user()->hasPermissionTo(Permission::SUPER_ADMIN)) {
+                $id = $request->id;
+                $status = $request->status->value ?? $request->status;
+                $withdraw = $this->repository->findOrFail($id);
+                $withdraw->status = $status;
+                $withdraw->save();
+                return $withdraw;
+            }
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $e) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
         }
-
-        $withdraw->status = $status;
-
-        $withdraw->save();
-
-        return $withdraw;
     }
 }

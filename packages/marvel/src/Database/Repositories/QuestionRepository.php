@@ -13,7 +13,7 @@ use Marvel\Exceptions\MarvelException;
 use Prettus\Repository\Criteria\RequestCriteria;
 use Prettus\Repository\Exceptions\RepositoryException;
 use Prettus\Validator\Exceptions\ValidatorException;
-
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class QuestionRepository extends BaseRepository
 {
@@ -66,7 +66,7 @@ class QuestionRepository extends BaseRepository
             $questionInput = $request->only($this->dataArray);
             return $this->create($questionInput);
         } catch (Exception $e) {
-            throw new MarvelException(SOMETHING_WENT_WRONG);
+            throw new HttpException(404, SOMETHING_WENT_WRONG);
         }
     }
 
@@ -77,13 +77,13 @@ class QuestionRepository extends BaseRepository
 
             $question->update($request->only($this->dataArray));
 
-            if(!empty($question->answer)) {
+            if (!empty($question->answer)) {
                 event(new QuestionAnswered($question));
             }
 
             return $question;
         } catch (ValidatorException $e) {
-            throw new MarvelException(SOMETHING_WENT_WRONG);
+            throw new HttpException(404, SOMETHING_WENT_WRONG);
         }
     }
 }

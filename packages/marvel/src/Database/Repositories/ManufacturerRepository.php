@@ -57,6 +57,7 @@ class ManufacturerRepository extends BaseRepository
     public function storeManufacturer($request)
     {
         $data = $request->only($this->dataArray);
+        $data['slug'] = $this->makeSlug($request);
         if ($request->user()->hasPermissionTo(Permission::SUPER_ADMIN)) {
             $data['is_approved'] = true;
         } else {
@@ -65,9 +66,13 @@ class ManufacturerRepository extends BaseRepository
         return $this->create($data);
     }
 
-    public function updateManufacturer($request, $author)
+    public function updateManufacturer($request, $Manufacturer)
     {
-        $author->update($request->only($this->dataArray));
-        return $this->findOrFail($author->id);
+        $data = $request->only($this->dataArray);
+        if (!empty($request->slug) &&  $request->slug != $Manufacturer['slug']) {
+            $data['slug'] = $this->makeSlug($request);
+        }
+        $Manufacturer->update($data);
+        return $this->findOrFail($Manufacturer->id);
     }
 }

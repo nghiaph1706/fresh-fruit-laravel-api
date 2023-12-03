@@ -11,7 +11,7 @@ class ProductMutator
 {
     public function store($rootValue, array $args, GraphQLContext $context)
     {
-        return Shop::call('Marvel\Http\Controllers\ProductController@store', $args);
+        return Shop::call('Marvel\Http\Controllers\ProductController@ProductStore', $args);
     }
 
     public function updateProduct($rootValue, array $args, GraphQLContext $context)
@@ -30,5 +30,9 @@ class ProductMutator
     public function calculateRentalPrice($rootValue, array $args, GraphQLContext $context)
     {
         return Shop::call('Marvel\Http\Controllers\ProductController@calculateRentalPrice', $args);
+    }
+    public function destroy($rootValue, array $args, GraphQLContext $context)
+    {
+        return Shop::call('Marvel\Http\Controllers\ProductController@destroyProduct', $args);
     }
 }

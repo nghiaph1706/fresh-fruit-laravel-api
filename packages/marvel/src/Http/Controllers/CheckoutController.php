@@ -3,6 +3,7 @@
 namespace Marvel\Http\Controllers;
 
 use Marvel\Database\Repositories\CheckoutRepository;
+use Marvel\Exceptions\MarvelException;
 use Marvel\Http\Requests\CheckoutVerifyRequest;
 
 class CheckoutController extends CoreController
@@ -22,6 +23,10 @@ class CheckoutController extends CoreController
      */
     public function verify(CheckoutVerifyRequest $request)
     {
-        return $this->repository->verify($request);
+        try {
+            return $this->repository->verify($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
+        }
     }
 }

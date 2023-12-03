@@ -10,6 +10,7 @@ use Marvel\Facades\Payment;
 use Marvel\Traits\PaymentTrait;
 use Prettus\Repository\Criteria\RequestCriteria;
 use Prettus\Repository\Exceptions\RepositoryException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class PaymentMethodRepository extends BaseRepository
 {
@@ -71,11 +72,10 @@ class PaymentMethodRepository extends BaseRepository
      * saveStripeCard
      *
      * @param  mixed  $request
-     * @param  mixed  $settings
      * @return PaymentMethod
      * @throws Exception
      */
-    public function saveStripeCard($request, $settings)
+    public function saveStripeCard($request)
     {
         $retrieved_payment_method = Payment::retrievePaymentMethod($request['method_key']);
 
@@ -97,10 +97,10 @@ class PaymentMethodRepository extends BaseRepository
      * @param  mixed $settings
      * @return void
      */
-    public function storeCards($request, $settings)
+    public function storeCards($request)
     {
         try {
-            switch ($settings->options['paymentGateway']) {
+            switch ($request['payment_gateway']) {
                 case 'stripe':
                     # code...
                     $retrieved_payment_method = Payment::retrievePaymentMethod($request['method_key']);
@@ -117,7 +117,7 @@ class PaymentMethodRepository extends BaseRepository
                     break;
             }
         } catch (Exception $e) {
-            throw $e;
+            throw new HttpException(400, COULD_NOT_CREATE_THE_RESOURCE);
         }
     }
 
@@ -129,7 +129,13 @@ class PaymentMethodRepository extends BaseRepository
      */
     public function setDefaultPaymentMethod($request)
     {
-        $payment_method = PaymentMethod::where('id', '=', $request['method_id'])->first();
+        $payment_method = PaymentMethod::where('id', '=', $request['method_id'])->firstOrFail();
+        /* Updating the default card to false if the payment gateway is stripe. */
+        PaymentMethod::where('id', '!=', $request['method_id'])->where([
+            'default_card'       => true,
+            "payment_gateway_id" =>  $payment_method?->payment_gateway_id,
+        ])->update(['default_card' => false]);
+
         $payment_method->default_card = true;
         $payment_method->save();
         event(new PaymentMethods($payment_method));

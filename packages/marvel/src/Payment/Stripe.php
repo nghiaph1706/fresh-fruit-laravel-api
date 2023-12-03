@@ -5,7 +5,6 @@ namespace Marvel\Payments;
 use Exception;
 
 use Marvel\Database\Models\Order;
-use Marvel\Exceptions\MarvelException;
 use Stripe\StripeClient;
 use Marvel\Payments\PaymentInterface;
 use Marvel\Payments\Base;
@@ -13,6 +12,7 @@ use Marvel\Traits\OrderStatusManagerWithPaymentTrait;
 use Marvel\Enums\OrderStatus;
 use Marvel\Enums\PaymentStatus;
 use Marvel\Traits\PaymentTrait;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class Stripe extends Base implements PaymentInterface
 {
@@ -33,7 +33,6 @@ class Stripe extends Base implements PaymentInterface
     $this->stripe = new StripeClient(config('shop.stripe.api_secret'));
   }
 
-
   /**
    * createCustomer
    *
@@ -52,7 +51,6 @@ class Stripe extends Base implements PaymentInterface
       'customer_email' => $customer->email,
     ];
   }
-
 
   /**
    * attachPaymentMethodToCustomer
@@ -73,8 +71,6 @@ class Stripe extends Base implements PaymentInterface
 
     return $attachedPaymentMethod;
   }
-
-
 
   /**
    * detachPaymentMethodToCustomer
@@ -100,13 +96,25 @@ class Stripe extends Base implements PaymentInterface
    */
   public function getIntent($data): array
   {
+    
     try {
       extract($data);
       $intent_array = [];
       $intent_array = [
         'amount' => round($amount, 2) * 100,
         'currency' => $this->currency,
-        'payment_method_types' => ['card'],
+        'description' => 'Marvel Payment',
+
+        /**
+         *  If you want selective payment method type then list those method name in the "payment_method_types" array 
+         * and uncomment this "payment_method_types" and comment "automatic_payment_methods" lines
+         * or you can enabled true "automatic_payment_methods" array. so that stripe can handle everything 
+         */
+
+        // 'payment_method_types' => ['card','cashapp','alipay','wechat_pay','etc'], 
+        'automatic_payment_methods' => [
+          'enabled' => true,
+        ],
         'metadata' => [
           'order_tracking_number' => $order_tracking_number,
         ]
@@ -124,21 +132,21 @@ class Stripe extends Base implements PaymentInterface
         'is_redirect'   => false
       ];
     } catch (\Stripe\Exception\CardException $e) {
-      throw new MarvelException(INVALID_CARD);
+      throw new HttpException(400, INVALID_CARD);
     } catch (\Stripe\Exception\RateLimitException $e) {
-      throw new MarvelException(TOO_MANY_REQUEST);
+      throw new HttpException(400, TOO_MANY_REQUEST);
     } catch (\Stripe\Exception\InvalidRequestException $e) {
-      throw new MarvelException(INVALID_REQUEST);
+      throw new HttpException(400, INVALID_REQUEST);
     } catch (\Stripe\Exception\InvalidArgumentException $e) {
-      throw new MarvelException(INVALID_REQUEST);
+      throw new HttpException(400, INVALID_REQUEST);
     } catch (\Stripe\Exception\AuthenticationException $e) {
-      throw new MarvelException(AUTHENTICATION_FAILED);
+      throw new HttpException(400, AUTHENTICATION_FAILED);
     } catch (\Stripe\Exception\ApiConnectionException $e) {
-      throw new MarvelException(API_CONNECTION_FAILED);
+      throw new HttpException(400, API_CONNECTION_FAILED);
     } catch (\Stripe\Exception\ApiErrorException $e) {
-      throw new MarvelException(API_CONNECTION_FAILED);
+      throw new HttpException(400, API_CONNECTION_FAILED);
     } catch (Exception $e) {
-      throw new MarvelException(SOMETHING_WENT_WRONG);
+      throw new HttpException(400, SOMETHING_WENT_WRONG_WITH_PAYMENT);
     }
   }
 
@@ -163,21 +171,21 @@ class Stripe extends Base implements PaymentInterface
 
       return $intent_data;
     } catch (\Stripe\Exception\ApiErrorException $e) {
-      throw new MarvelException(API_CONNECTION_FAILED);
+      throw new HttpException(400, API_CONNECTION_FAILED);
     } catch (\Stripe\Exception\RateLimitException $e) {
-      throw new MarvelException(TOO_MANY_REQUEST);
+      throw new HttpException(400, TOO_MANY_REQUEST);
     } catch (\Stripe\Exception\InvalidRequestException $e) {
-      throw new MarvelException(INVALID_REQUEST);
+      throw new HttpException(400, INVALID_REQUEST);
     } catch (\Stripe\Exception\InvalidArgumentException $e) {
-      throw new MarvelException(INVALID_REQUEST);
+      throw new HttpException(400, INVALID_REQUEST);
     } catch (\Stripe\Exception\AuthenticationException $e) {
-      throw new MarvelException(AUTHENTICATION_FAILED);
+      throw new HttpException(400, AUTHENTICATION_FAILED);
     } catch (\Stripe\Exception\ApiConnectionException $e) {
-      throw new MarvelException(API_CONNECTION_FAILED);
+      throw new HttpException(400, API_CONNECTION_FAILED);
     } catch (\Stripe\Exception\ApiErrorException $e) {
-      throw new MarvelException(API_CONNECTION_FAILED);
+      throw new HttpException(400, API_CONNECTION_FAILED);
     } catch (\Exception $e) {
-      throw $e;
+      throw new HttpException(400, SOMETHING_WENT_WRONG_WITH_PAYMENT);
     }
   }
 
@@ -198,31 +206,31 @@ class Stripe extends Base implements PaymentInterface
 
       return $intent_data;
     } catch (\Stripe\Exception\ApiErrorException $e) {
-      throw new MarvelException(API_CONNECTION_FAILED);
+      throw new HttpException(400, API_CONNECTION_FAILED);
     } catch (\Stripe\Exception\RateLimitException $e) {
-      throw new MarvelException(TOO_MANY_REQUEST);
+      throw new HttpException(400, TOO_MANY_REQUEST);
     } catch (\Stripe\Exception\InvalidRequestException $e) {
-      throw new MarvelException(INVALID_REQUEST);
+      throw new HttpException(400, INVALID_REQUEST);
     } catch (\Stripe\Exception\InvalidArgumentException $e) {
-      throw new MarvelException(INVALID_REQUEST);
+      throw new HttpException(400, INVALID_REQUEST);
     } catch (\Stripe\Exception\AuthenticationException $e) {
-      throw new MarvelException(AUTHENTICATION_FAILED);
+      throw new HttpException(400, AUTHENTICATION_FAILED);
     } catch (\Stripe\Exception\ApiConnectionException $e) {
-      throw new MarvelException(API_CONNECTION_FAILED);
+      throw new HttpException(400, API_CONNECTION_FAILED);
     } catch (\Stripe\Exception\ApiErrorException $e) {
-      throw new MarvelException(API_CONNECTION_FAILED);
+      throw new HttpException(400, API_CONNECTION_FAILED);
     } catch (\Exception $e) {
-      throw $e;
+      throw new HttpException(400, SOMETHING_WENT_WRONG_WITH_PAYMENT);
     }
   }
 
-    /**
-     * verify
-     *
-     * @param $id
-     * @return bool
-     * @throws MarvelException
-     */
+  /**
+   * verify
+   *
+   * @param $id
+   * @return bool
+   * @throws Exception
+   */
   public function verify($id): bool
   {
     try {
@@ -230,19 +238,19 @@ class Stripe extends Base implements PaymentInterface
 
       return isset($payment->paid) ? $payment->paid : false;
     } catch (\Stripe\Exception\CardException $e) {
-      throw new MarvelException(INVALID_CARD);
+      throw new HttpException(400, INVALID_CARD);
     } catch (\Stripe\Exception\RateLimitException $e) {
-      throw new MarvelException(TOO_MANY_REQUEST);
+      throw new HttpException(400, TOO_MANY_REQUEST);
     } catch (\Stripe\Exception\InvalidRequestException $e) {
-      throw new MarvelException(INVALID_REQUEST);
+      throw new HttpException(400, INVALID_REQUEST);
     } catch (\Stripe\Exception\AuthenticationException $e) {
-      throw new MarvelException(AUTHENTICATION_FAILED);
+      throw new HttpException(400, AUTHENTICATION_FAILED);
     } catch (\Stripe\Exception\ApiConnectionException $e) {
-      throw new MarvelException(API_CONNECTION_FAILED);
+      throw new HttpException(400, API_CONNECTION_FAILED);
     } catch (\Stripe\Exception\ApiErrorException $e) {
-      throw new MarvelException(API_CONNECTION_FAILED);
+      throw new HttpException(400, API_CONNECTION_FAILED);
     } catch (Exception $e) {
-      throw new MarvelException(SOMETHING_WENT_WRONG);
+      throw new HttpException(400, SOMETHING_WENT_WRONG_WITH_PAYMENT);
     }
   }
 
@@ -254,12 +262,10 @@ class Stripe extends Base implements PaymentInterface
    */
   public function handleWebHooks($request): void
   {
-
     $endpoint_secret = config('shop.stripe.webhook_secret');
     $payload = @file_get_contents('php://input');
     $sig_header = $_SERVER['HTTP_STRIPE_SIGNATURE'];
     $event = null;
-
 
     try {
       $event = \Stripe\Webhook::constructEvent(
@@ -277,32 +283,22 @@ class Stripe extends Base implements PaymentInterface
       exit();
     }
 
-    $webhook_return_message = [];
+    $intent = $this->matchSucceededOrFailed($request);
 
-    switch ($event->type) {
-      case 'payment_intent.succeeded':
-        $intent = $event->data->object;
-        break;
-
-      case 'payment_intent.payment_failed':
-        $intent = $event->data->object;
-        $error_message = $intent->last_payment_error ? $intent->last_payment_error->message : "";
-        break;
-
-      default:
-        // Unexpected event type
-        logger('Received unknown event type' . $event->type);
-        break;
+    if (!$intent) {
+      http_response_code(200);
+      exit();
     }
 
-    $webhook_return_message['intent_id']         = $intent->id;
-    $webhook_return_message['order_tracking_id'] = $intent->metadata->order_tracking_number;
-    $webhook_return_message['key_messages']      = $intent->charges->data[0]->outcome->reason;
-    $webhook_return_message['charge_status']     = $intent->charges->data[0]->status;
-    $webhook_return_message['charge_state']      = $this->verify($intent->charges->data[0]->id);
-    if (isset($error_message)) {
-      $webhook_return_message['error_message'] = $error_message;
-    }
+    $webhook_return_message = [
+      'charge_status'     => $intent['status'],
+      'payment_intent'    => $intent['payment_intent'],
+      'amount'            => $intent['amount'],
+      'paid'              => $intent['paid'],
+      'payment_method'    => $intent['payment_method_details']['type'],
+      'amount_captured'   => $intent['amount_captured'],
+      'order_tracking_id' => $intent['metadata']['order_tracking_number'],
+    ];
 
     // send response to check charge status
     $this->paymentGatewayWebHookResponse($webhook_return_message);
@@ -310,7 +306,6 @@ class Stripe extends Base implements PaymentInterface
     http_response_code(200);
     exit();
   }
-
 
   /**
    * paymentGatewayWebHookResponse
@@ -320,7 +315,7 @@ class Stripe extends Base implements PaymentInterface
    */
   public function paymentGatewayWebHookResponse($data)
   {
-    $order = Order::where('tracking_number', '=', $data['order_tracking_id'])->first();
+    $order = Order::where('tracking_number', '=', $data['order_tracking_id'])->firstOrFail();
 
     if (isset($data)) {
       switch ($data['charge_status']) {
@@ -335,7 +330,7 @@ class Stripe extends Base implements PaymentInterface
           # Throw email to admin that order is pending.
           # Throw email to user that order is pending.
           $order->order_status = OrderStatus::PENDING;
-          $order->payment_status = PaymentStatus::PENDING;
+          $order->payment_status = PaymentStatus::AWAITING_FOR_APPROVAL;
           $order->save();
           $this->orderStatusManagementOnPayment($order, OrderStatus::PENDING, PaymentStatus::AWAITING_FOR_APPROVAL);
           break;
@@ -390,5 +385,13 @@ class Stripe extends Base implements PaymentInterface
     } catch (Exception $e) {
       throw $e;
     }
+  }
+
+  public function matchSucceededOrFailed($request)
+  {
+    if (isset($request?->data['object']['object']) && $request?->data['object']['object'] == 'charge') {
+      return $request?->data['object'];
+    }
+    return false;
   }
 }

@@ -21,6 +21,16 @@ class TagRepository extends BaseRepository
         'language'
     ];
 
+    protected $dataArray = [
+        'name',
+        'slug',
+        'type_id',
+        'icon',
+        'image',
+        'details',
+        'language',
+    ];
+
     public function boot()
     {
         try {
@@ -37,5 +47,15 @@ class TagRepository extends BaseRepository
     public function model()
     {
         return Tag::class;
+    }
+
+    public function updateTag($request, $tag)
+    {
+        $data = $request->only($this->dataArray);
+        if (!empty($request->slug) &&  $request->slug != $tag['slug']) {
+            $data['slug'] = $this->makeSlug($request);
+        }
+        $tag->update($data);
+        return $this->findOrFail($tag->id);
     }
 }

@@ -55,7 +55,7 @@ class ProfileController extends CoreController
     {
         try {
             return $this->repository->with('customer')->findOrFail($id);
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -72,7 +72,7 @@ class ProfileController extends CoreController
         try {
             $validatedData = $request->all();
             return $this->repository->findOrFail($id)->update($validatedData);
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -87,7 +87,7 @@ class ProfileController extends CoreController
     {
         try {
             return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }

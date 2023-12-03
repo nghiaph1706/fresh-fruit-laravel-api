@@ -41,8 +41,12 @@ class ShippingController extends CoreController
      */
     public function store(CreateShippingRequest $request)
     {
-        $validateData = $request->validated();
-        return $this->repository->create($validateData);
+        try {
+            $validateData = $request->validated();
+            return $this->repository->create($validateData);
+        } catch (MarvelException $th) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
+        }
     }
 
     /**
@@ -55,7 +59,7 @@ class ShippingController extends CoreController
     {
         try {
             return $this->repository->findOrFail($id);
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -72,7 +76,7 @@ class ShippingController extends CoreController
         try {
             $validateData = $request->validated();
             return $this->repository->findOrFail($id)->update($validateData);
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -87,7 +91,7 @@ class ShippingController extends CoreController
     {
         try {
             return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }

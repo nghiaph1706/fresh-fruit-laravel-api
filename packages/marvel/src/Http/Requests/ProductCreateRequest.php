@@ -6,6 +6,7 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Validation\Rule;
+use Marvel\Enums\ProductStatus;
 use Marvel\Enums\ProductType;
 
 class ProductCreateRequest extends FormRequest
@@ -20,6 +21,7 @@ class ProductCreateRequest extends FormRequest
         return true;
     }
 
+    
     /**
      * Get the validation rules that apply to the request.
      *
@@ -27,6 +29,20 @@ class ProductCreateRequest extends FormRequest
      */
     public function rules()
     {
+        $productStatus = [
+            ProductStatus::UNDER_REVIEW,
+            ProductStatus::APPROVED,
+            ProductStatus::REJECTED,
+            ProductStatus::PUBLISH,
+            ProductStatus::UNPUBLISH,
+            ProductStatus::DRAFT,
+        ];
+
+        $productType = [
+            ProductType::SIMPLE,
+            ProductType::VARIABLE
+        ];
+
         return [
             'name'                         => ['required', 'string', 'max:255'],
             'slug'                         => ['nullable', 'string'],
@@ -36,7 +52,7 @@ class ProductCreateRequest extends FormRequest
             'shop_id'                      => ['required', 'exists:Marvel\Database\Models\Shop,id'],
             'manufacturer_id'              => ['nullable', 'exists:Marvel\Database\Models\Manufacturer,id'],
             'author_id'                    => ['nullable', 'exists:Marvel\Database\Models\Author,id'],
-            'product_type'                 => ['required', Rule::in([ProductType::SIMPLE, ProductType::VARIABLE])],
+            'product_type'                 => ['required', Rule::in($productType)],
             'categories'                   => ['array'],
             'tags'                         => ['array'],
             'language'                     => ['nullable', 'string'],
@@ -48,11 +64,11 @@ class ProductCreateRequest extends FormRequest
             'quantity'                     => ['nullable', 'integer'],
             'unit'                         => ['required', 'string'],
             'description'                  => ['nullable', 'string'],
-            'sku'                          => ['string'],
+            'sku'                          => ['string', 'unique:variation_options,sku'],
             'image'                        => ['array'],
             'gallery'                      => ['array'],
             'video'                        => ['array'],
-            'status'                       => ['string', Rule::in(['publish', 'draft'])],
+            'status'                       => ['string', Rule::in($productStatus)],
             'height'                       => ['nullable', 'string'],
             'length'                       => ['nullable', 'string'],
             'width'                        => ['nullable', 'string'],
@@ -63,6 +79,7 @@ class ProductCreateRequest extends FormRequest
             'is_digital'                   => ['boolean'],
             'is_external'                  => ['boolean'],
             'is_rental'                    => ['boolean'],
+            "variation_options.upsert.*.sku" => ['string', 'unique:variation_options,sku'],
         ];
     }
 

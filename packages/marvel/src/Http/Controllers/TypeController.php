@@ -9,6 +9,7 @@ use Marvel\Database\Models\Type;
 use Marvel\Database\Repositories\TypeRepository;
 use Marvel\Exceptions\MarvelException;
 use Marvel\Http\Requests\TypeRequest;
+use Marvel\Http\Resources\TypeResource;
 use Prettus\Validator\Exceptions\ValidatorException;
 
 class TypeController extends CoreController
@@ -30,7 +31,8 @@ class TypeController extends CoreController
     public function index(Request $request)
     {
         $language = $request->language ?? DEFAULT_LANGUAGE;
-        return $this->repository->where('language', $language)->get();
+        $types = $this->repository->where('language', $language)->get();
+        return TypeResource::collection($types);
     }
 
     /**
@@ -42,7 +44,11 @@ class TypeController extends CoreController
      */
     public function store(TypeRequest $request)
     {
-        return $this->repository->storeType($request);
+        try {
+            return $this->repository->storeType($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_CREATE_THE_RESOURCE);
+        }
     }
 
     /**
@@ -58,10 +64,12 @@ class TypeController extends CoreController
             $language = $request->language ?? DEFAULT_LANGUAGE;
             if (is_numeric($params)) {
                 $params = (int) $params;
-                return $this->repository->where('id', $params)->with('banners')->firstOrFail();
+                $type = $this->repository->where('id', $params)->with('banners')->firstOrFail();
+                return new TypeResource($type);
             }
-            return $this->repository->where('slug', $params)->where('language', $language)->with('banners')->firstOrFail();
-        } catch (\Exception $e) {
+            $type = $this->repository->where('slug', $params)->where('language', $language)->with('banners')->firstOrFail();
+            return new TypeResource($type);
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -83,7 +91,7 @@ class TypeController extends CoreController
     {
         try {
             $type = $this->repository->with('banners')->findOrFail($request->id);
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
         return $this->repository->updateType($request, $type);
@@ -99,7 +107,7 @@ class TypeController extends CoreController
     {
         try {
             return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }

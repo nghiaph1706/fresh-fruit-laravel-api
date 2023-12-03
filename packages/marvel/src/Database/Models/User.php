@@ -3,6 +3,7 @@
 namespace Marvel\Database\Models;
 
 use App\Enums\RoleType;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Spatie\Permission\Traits\HasRoles;
 use Illuminate\Database\Eloquent\Builder;
@@ -14,7 +15,7 @@ use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
 
-class User extends Authenticatable
+class User extends Authenticatable implements MustVerifyEmail
 {
     use Notifiable;
     use HasRoles;
@@ -41,6 +42,12 @@ class User extends Authenticatable
         'password', 'remember_token',
     ];
 
+    protected $casts = [
+        'email_verified_at' => 'datetime',
+    ];
+
+    protected $appends = ['email_verified'];
+
     protected static function boot()
     {
         parent::boot();
@@ -50,14 +57,10 @@ class User extends Authenticatable
         });
     }
 
-    /**
-     * The attributes that should be cast to native types.
-     *
-     * @var array
-     */
-    protected $casts = [
-        'email_verified_at' => 'datetime',
-    ];
+    public function getEmailVerifiedAttribute(): bool
+    {
+        return $this->hasVerifiedEmail();
+    }
 
 
     /**
@@ -175,5 +178,25 @@ class User extends Authenticatable
     public function payment_gateways(): HasMany
     {
         return $this->HasMany(PaymentGateway::class, 'user_id');
+    }
+
+    /**
+     * faqs
+     *
+     * @return HasMany
+     */
+    public function faqs(): HasMany
+    {
+        return $this->HasMany(Faqs::class);
+    }
+
+    /**
+     * terms and conditions
+     *
+     * @return HasMany
+     */
+    public function terms_and_conditions(): HasMany
+    {
+        return $this->HasMany(TermsAndConditions::class);
     }
 }

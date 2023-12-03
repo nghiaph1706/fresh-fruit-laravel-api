@@ -27,6 +27,7 @@ class CopyFilesCommand extends Command
 
             (new Filesystem)->copyDirectory(__DIR__ . '/../../stubs/resources/views/emails', resource_path('views/emails'));
             (new Filesystem)->copyDirectory(__DIR__ . '/../../stubs/resources/views/pdf', resource_path('views/pdf'));
+            (new Filesystem)->copyDirectory(__DIR__ . '/../../stubs/resources/lang', resource_path('lang'));
 
             $this->info('Installation Complete');
         } catch (\Exception $e) {

@@ -26,6 +26,8 @@ return [
 
     'media_disk' => env('MEDIA_DISK'),
 
+    'version' => env('APP_VERSION', 12),
+
     'stripe_api_key' => env('STRIPE_API_KEY'),
 
     'app_notice_domain' => env('APP_NOTICE_DOMAIN', 'MARVEL_'),
@@ -34,31 +36,43 @@ return [
 
     'default_language' => env('DEFAULT_LANGUAGE', 'en'),
 
-    'translation_enabled' => env('TRANSLATION', true),
+    'translation_enabled' => env('TRANSLATION_ENABLED', true),
 
     'default_currency' => env('DEFAULT_CURRENCY', 'USD'),
 
     'active_payment_gateway' => env('ACTIVE_PAYMENT_GATEWAY', 'stripe'),
 
     'razorpay' => [
-        'key_id' => env('RAZORPAY_KEY_ID'),
-        'key_secret' => env('RAZORPAY_KEY_SECRET'),
+        'key_id'         => env('RAZORPAY_KEY_ID'),
+        'key_secret'     => env('RAZORPAY_KEY_SECRET'),
         'webhook_secret' => env('RAZORPAY_WEBHOOK_SECRET_KEY')
     ],
 
     'mollie' => [
-        'mollie_key' => env('MOLLIE_KEY'),
+        'mollie_key'  => env('MOLLIE_KEY'),
         'webhook_url' => env('MOLLIE_WEBHOOK_URL'),
     ],
 
     'stripe' => [
-        'api_secret' => env('STRIPE_API_KEY'),
+        'api_secret'     => env('STRIPE_API_KEY'),
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET_KEY')
     ],
 
-    'paystact' => [
-        'payment_url' => env('PAYSTACK_PAYMENT_URL'),
+    'paystack' => [
+        'public_key' => env('PAYSTACK_PUBLIC_KEY'),
         'secret_key' => env('PAYSTACK_SECRET_KEY'),
+    ],
+
+    'xendit' => [
+        'api_key'               => env('API_KEY'),
+        'webhook_url'           => env('XENDIT_WEBHOOK_URL'),
+        'xendit_callback_token' => env('XENDIT_CALLBACK_TOKEN'),
+    ],
+
+    'paymongo' => [
+        'public_key' => env('PAYMONGO_SECRET_KEY'),
+        'secret_key' => env('PAYMONGO_PUBLIC_KEY'),
+        'webhook_sig' => env('PAYMONGO_WEBHOOK_SIG'),
     ],
 
     'paypal' => [
@@ -72,6 +86,40 @@ return [
             'client_secret' => env('PAYPAL_LIVE_CLIENT_SECRET', ''),
         ],
         'payment_action' => env('PAYPAL_PAYMENT_ACTION', 'Sale'), // Can only be 'Sale', 'Authorization' or 'Order'
-        'webhook_id'     => env('PAYPAL_WEBHOOK_ID')
+        'webhook_id'     => env('PAYPAL_WEBHOOK_ID'),
+        'currency'       => env('PAYPAL_CURRENCY', 'USD'),
+        'notify_url'     => env('PAYPAL_NOTIFY_URL', ''), // Change this accordingly for your application.
+        'locale'         => env('PAYPAL_LOCALE', 'en_US'), // force gateway language  i.e. it_IT, es_ES, en_US ... (for express checkout only)
+        'validate_ssl'   => env('PAYPAL_VALIDATE_SSL', true), // Validate SSL when creating api client.
     ],
+
+    'sslcommerz' => [
+        'store_id'       => env('SSLC_STORE_ID'),
+        'store_password' => env('SSLC_STORE_PASSWORD'),
+    ],
+    'iyzico' => [
+        'api_Key'    => env('IYZIPAY_API_KEY', ''),
+        'secret_Key' => env('IYZIPAY_SECRET_KEY', ''),
+        'baseUrl'    => env('IYZIPAY_BASE_URL', 'https://sandbox-api.iyzipay.com'),
+    ],
+    'bkash' => [
+        'app_Key'      => env('BKASH_APP_KEY', ''),
+        'app_secret'   => env('BKASH_APP_SECRET', ''),
+        'username'     => env('BKASH_USERNAME', ''),
+        'password'     => env('BKASH_PASSWORD', ''),
+        'callback_url' => env('BKASH_CALLBACK_URL', 'http://127.0.0.1:8000/bkash/callback'),
+    ],
+    'flutterwave' => [
+        'public_key' => env('FLW_PUBLIC_KEY'),
+        'secret_key' => env('FLW_SECRET_KEY'),
+        'secret_hash' => env('FLW_SECRET_HASH'),
+    ],
+
+    'openai' => [
+        'secret_Key' => env('OPENAI_SECRET_KEY'),
+    ],
+
+    'pusher' => [
+        'enabled' => env('PUSHER_ENABLED', false),
+    ]
 ];

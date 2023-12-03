@@ -1,15 +1,15 @@
 {{--$order collection is available here--}}
 
 @component('mail::message')
-# Your order was cancelled!
+# {{ __('sms.order.cancelOrder.admin.subject') }}
 
-Your order was cancelled! Please contact with authority if needed.
-Your Order tracking id {{$order->tracking_number}}
+{{ __('sms.order.cancelOrder.admin.message',['ORDER_TRACKING_NUMBER'=>$order->tracking_number]) }}
+
 
 @component('mail::button', ['url' => $url ])
-View Order
+    {{__('common.view-order')}}
 @endcomponent
 
-Thanks,<br>
+{{__('common.thanks')}},<br>
 {{ config('app.name') }}
 @endcomponent

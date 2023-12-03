@@ -16,7 +16,7 @@ class OrderMutator
     }
     public function update($rootValue, array $args, GraphQLContext $context)
     {
-        return Shop::call('Marvel\Http\Controllers\OrderController@updateOrderGql', $args);
+        return Shop::call('Marvel\Http\Controllers\OrderController@updateOrder', $args);
     }
     public function generateInvoiceDownloadUrl($rootValue, array $args, GraphQLContext $context)
     {

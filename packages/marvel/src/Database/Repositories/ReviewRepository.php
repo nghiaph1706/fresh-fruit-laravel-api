@@ -6,6 +6,7 @@ namespace Marvel\Database\Repositories;
 
 use App\Events\QuestionAnswered;
 use App\Events\ReviewCreated;
+use Exception;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
@@ -15,7 +16,7 @@ use Marvel\Exceptions\MarvelException;
 use Prettus\Repository\Criteria\RequestCriteria;
 use Prettus\Repository\Exceptions\RepositoryException;
 use Prettus\Validator\Exceptions\ValidatorException;
-
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class ReviewRepository extends BaseRepository
 {
@@ -73,8 +74,8 @@ class ReviewRepository extends BaseRepository
 
             event(new ReviewCreated($review));
             return $review;
-        } catch (\Exception $e) {
-            throw new MarvelException(SOMETHING_WENT_WRONG);
+        } catch (Exception $e) {
+            throw new HttpException(400, SOMETHING_WENT_WRONG);
         }
     }
 
@@ -84,8 +85,8 @@ class ReviewRepository extends BaseRepository
             $review = $this->findOrFail($id);
             $review->update($request->only($this->dataArray));
             return $review;
-        } catch (ValidatorException $e) {
-            throw new MarvelException(SOMETHING_WENT_WRONG);
+        } catch (Exception $e) {
+            throw new HttpException(400, SOMETHING_WENT_WRONG);
         }
     }
 }

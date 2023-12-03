@@ -18,6 +18,9 @@ extend type Query {
     shop(id: ID @eq, slug: String @eq): Shop @find
     followedShopsPopularProducts(limit: Int): [Product]
         @field(resolver: "ShopQuery@followedShopsPopularProducts")
+
+    findShopDistance(lat: String, lng: String): [Shop]
+        @field(resolver: "ShopQuery@findShopDistance")
 }
 
 type Shop {
@@ -37,6 +40,9 @@ type Shop {
     logo: Attachment
     address: UserAddress
     settings: ShopSettings
+    distance: Float
+    lat: Float
+    lng: Float
     created_at: DateTime
     updated_at: DateTime
 }
@@ -55,6 +61,7 @@ type Location {
     city: String
     state: String
     country: String
+    street_address: String
     zip: String
     formattedAddress: String
 }
@@ -113,6 +120,7 @@ input CreateShopInput {
 input UpdateShopInput {
     id: ID!
     name: String!
+    slug: String!
     description: String
     cover_image: AttachmentInput
     logo: AttachmentInput
@@ -143,6 +151,7 @@ input LocationInput {
     state: String
     country: String
     zip: String
+    street_address: String
     formattedAddress: String
 }
 

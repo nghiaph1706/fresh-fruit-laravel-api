@@ -3,22 +3,29 @@
 
 namespace Marvel\Database\Repositories;
 
-use Carbon\Carbon;
-use Carbon\CarbonPeriod;
 use Exception;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Marvel\Database\Models\Availability;
+use Marvel\Database\Models\DigitalFile;
 use Marvel\Database\Models\Product;
 use Marvel\Database\Models\Resource;
+use Marvel\Database\Models\Type;
 use Marvel\Database\Models\Variation;
+use Marvel\Enums\ProductStatus;
 use Marvel\Enums\ProductType;
-use Marvel\Exceptions\MarvelException;
 use Prettus\Repository\Criteria\RequestCriteria;
 use Prettus\Repository\Exceptions\RepositoryException;
-use Prettus\Validator\Exceptions\ValidatorException;
 use Spatie\Period\Boundaries;
 use Spatie\Period\Period;
 use Spatie\Period\Precision;
+use Marvel\Enums\Permission;
+use Marvel\Events\ProductReviewApproved;
+use Marvel\Events\ProductReviewRejected;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class ProductRepository extends BaseRepository
 {
@@ -47,7 +54,7 @@ class ProductRepository extends BaseRepository
         'language',
         'metas.key',
         'metas.value',
-
+        'product_type'
     ];
 
     protected $dataArray = [
@@ -72,6 +79,7 @@ class ProductRepository extends BaseRepository
         'sku',
         'image',
         'gallery',
+        'video',
         'status',
         'height',
         'length',
@@ -79,6 +87,7 @@ class ProductRepository extends BaseRepository
         'in_stock',
         'is_taxable',
         'shop_id',
+        'sold_quantity'
     ];
 
     public function boot()
@@ -98,21 +107,82 @@ class ProductRepository extends BaseRepository
         return Product::class;
     }
 
+
+    /**
+     * processFlashSaleProducts
+     *
+     * @param  Request $request
+     * @return object
+     */
+    public function processFlashSaleProducts(Request $request, $products_query)
+    {
+        $user = $request->user();
+        switch ($user) {
+            case $user->hasPermissionTo(Permission::SUPER_ADMIN):
+                // if condition : when he entered into vendor shop & check
+                // else condition : during deal data build
+                if ($request->shop_id) {
+                    $products_query = $products_query->where('in_flash_sale', '=', true)->where('shop_id', '=', $request->shop_id);
+                } else {
+                    $products_query = $products_query->where('in_flash_sale', '=', false)->where('sale_price', '=', null);
+                }
+                break;
+
+            case $user->hasPermissionTo(Permission::STORE_OWNER):
+
+                // if condition : when he want to see shop specific products
+                // else condition : fetched all deal products of vendor's listed all shops. This can be used in vendor root page route
+                if ($request->shop_id) {
+                    $products_query = $products_query->where('in_flash_sale', '=', true);
+                } else {
+                    $products_query = $products_query->where('in_flash_sale', '=', true)->whereIn('shop_id', $user->shops->pluck('id'));
+                }
+                break;
+
+            case $user->hasPermissionTo(Permission::STAFF):
+                // staff can see only his assigned shop's deals product
+                $products_query = $products_query->where('in_flash_sale', '=', true);
+                break;
+
+
+            case $user->hasPermissionTo(Permission::CUSTOMER):
+                // customer can see all the products of a deal
+                $products_query = $products_query->where('in_flash_sale', '=', true);
+                break;
+        }
+
+        return $products_query;
+    }
+
+
     /**
      * storeProduct
      *
      * @param  mixed $request
+     * @param  mixed $setting
      * @return void
      */
-    public function storeProduct($request)
+    public function storeProduct($request, $setting)
     {
         try {
             $data = $request->only($this->dataArray);
+            $data['slug'] = $this->makeSlug($request);
+
+            if ($setting->options["isProductReview"]) {
+                if ($request->status == ProductStatus::DRAFT) {
+                    $data['status'] = ProductStatus::DRAFT;
+                } elseif ($request->status == ProductStatus::UNDER_REVIEW) {
+                    $data['status'] = ProductStatus::UNDER_REVIEW;
+                } else {
+                    throw new HttpException(406, 'The selected status is invalid.');
+                }
+            }
 
             if ($request->product_type == ProductType::SIMPLE) {
                 $data['max_price'] = $data['price'];
                 $data['min_price'] = $data['price'];
             }
+
             $product = $this->create($data);
 
             if (empty($product->slug) || is_numeric($product->slug)) {
@@ -151,39 +221,92 @@ class ProductRepository extends BaseRepository
                 $product->variations()->attach($request['variations']);
             }
             if (isset($request['variation_options'])) {
+
                 foreach ($request['variation_options']['upsert'] as $variation_option) {
+
                     if (isset($variation_option['is_digital']) && $variation_option['is_digital']) {
                         $file = $variation_option['digital_file'];
                         unset($variation_option['digital_file']);
                     }
+
                     $new_variation_option = $product->variation_options()->create($variation_option);
+
                     if (isset($variation_option['is_digital']) && $variation_option['is_digital']) {
-                        $new_variation_option->digital_file()->create($file);
+                        $digital_file = $new_variation_option->digital_file()->create($file);
+                        $new_variation_option->update([
+                            'digital_file_tracker' => $digital_file->id
+                        ]);
                     }
                 }
             }
-            if (isset($request['is_digital']) && $request['is_digital'] === true && isset($request['digital_file'])) {
-                $product->digital_file()->create($request['digital_file']);
+
+            if (isset($request['is_digital']) && ($request['is_digital'] === true || $request['is_digital'] === 1) && isset($request['digital_file'])) {
+                $digitalFileArray['attachment_id'] = $request['digital_file']['attachment_id'];
+                $digitalFileArray['url'] = $request['digital_file']['url'];
+                $product->digital_file()->create($digitalFileArray);
             }
 
             $product->save();
             return $product;
-        } catch (ValidatorException $e) {
-            throw new MarvelException(SOMETHING_WENT_WRONG);
+        } catch (Exception $e) {
+            throw $e;
         }
+    }
+
+    public function checkProductForPublish($request, $product)
+    {
+        $status = '';
+        if ($product->shop['owner']['id'] == $request->user()->id) {
+            if ($product->status == ProductStatus::DRAFT || $product->status == ProductStatus::UNDER_REVIEW || $product->status == ProductStatus::REJECTED) {
+                if ($request->status == ProductStatus::DRAFT) {
+                    $status = ProductStatus::DRAFT;
+                } elseif ($request->status == ProductStatus::UNDER_REVIEW) {
+                    $status = ProductStatus::UNDER_REVIEW;
+                } else {
+                    $status = ProductStatus::DRAFT;
+                }
+            } elseif ($product->status == ProductStatus::APPROVED || $product->status == ProductStatus::PUBLISH || $product->status == ProductStatus::UNPUBLISH) {
+                if ($request->status == ProductStatus::PUBLISH) {
+                    $status = ProductStatus::PUBLISH;
+                } elseif ($request->status == ProductStatus::UNPUBLISH) {
+                    $status = ProductStatus::UNPUBLISH;
+                } else {
+                    $status = ProductStatus::UNPUBLISH;
+                }
+            }
+        } elseif ($request->user()->hasPermissionTo(Permission::SUPER_ADMIN)) {
+            if ($request->status == ProductStatus::APPROVED) {
+                $status = ProductStatus::PUBLISH;
+                event(new ProductReviewApproved($product));
+            } elseif ($request->status == ProductStatus::REJECTED) {
+                $status = ProductStatus::REJECTED;
+                event(new ProductReviewRejected($product));
+            } elseif ($request->status == ProductStatus::PUBLISH) {
+                return ProductStatus::PUBLISH;
+            } elseif ($request->status == ProductStatus::UNPUBLISH) {
+                $status = ProductStatus::UNPUBLISH;
+            } else {
+                $status = ProductStatus::REJECTED;
+            }
+        } else {
+            $status = ProductStatus::REJECTED;
+        }
+        return $status;
     }
 
     /**
      * updateProduct
      *
-     * @param  mixed $request
-     * @param  mixed $id
+     * @param  $request
+     * @param  $id
+     * @param  $setting
      * @return void
      */
-    public function updateProduct($request, $id)
+    public function updateProduct($request, $id, $setting)
     {
         try {
             $product = $this->findOrFail($id);
+
             if (is_array($request['metas'])) {
                 foreach ($request['metas'] as $key => $value) {
                     $metas[$value['key']] = $value['value'];
@@ -226,31 +349,52 @@ class ProductRepository extends BaseRepository
             if (isset($request['variation_options'])) {
                 if (isset($request['variation_options']['upsert'])) {
                     foreach ($request['variation_options']['upsert'] as $key => $variation) {
+
+                        $variation['sale_price'] = isset($variation['sale_price']) ? $variation['sale_price'] : null;
+
                         if (isset($variation['is_digital']) && $variation['is_digital']) {
+
                             $file = $variation['digital_file'];
                             unset($variation['digital_file']);
+
                             if (isset($variation['id'])) {
                                 $product->variation_options()->where('id', $variation['id'])->update($variation);
+
                                 try {
                                     $updated_variation = Variation::findOrFail($variation['id']);
                                 } catch (Exception $e) {
-                                    throw new MarvelException(NOT_FOUND);
+                                    throw new ModelNotFoundException(NOT_FOUND);
                                 }
+
                                 if (TRANSLATION_ENABLED) {
-                                    Variation::where('sku', $updated_variation->sku)->where('id', '!=', $updated_variation->id)->update([
+                                    Variation::where('sku', $updated_variation->sku)->where('id', '=', $updated_variation->id)->update([
                                         'price' => $updated_variation->price,
                                         'sale_price' => $updated_variation->sale_price,
                                         'quantity' => $updated_variation->quantity,
                                     ]);
                                 }
-                                if (isset($file['id'])) {
-                                    $updated_variation->digital_file()->where('id', $file['id'])->update($file);
+
+
+                                if (isset($updated_variation->digital_file_tracker)) {
+                                    if (isset($file['attachment_id'])) {
+                                        $updated_variation->digital_file()->where('fileable_id', $updated_variation->id)->update($file);
+                                        $updated_digital_file = DigitalFile::where('fileable_id', $updated_variation->id)->first();
+                                        $updated_variation->update([
+                                            'digital_file_tracker' => $updated_digital_file->id,
+                                        ]);
+                                    }
                                 } else {
-                                    $updated_variation->digital_file()->create($file);
+                                    $created_digital_file = $updated_variation->digital_file()->create($file);
+                                    $updated_variation->update([
+                                        'digital_file_tracker' => $created_digital_file->id,
+                                    ]);
                                 }
                             } else {
                                 $new_variation = $product->variation_options()->create($variation);
-                                $new_variation->digital_file()->create($file);
+                                $digital_file = $new_variation->digital_file()->create($file);
+                                $new_variation->update([
+                                    'digital_file_tracker' => $digital_file->id
+                                ]);
                             }
                         } else {
                             if (isset($variation['id'])) {
@@ -272,6 +416,12 @@ class ProductRepository extends BaseRepository
                 }
             }
             $data = $request->only($this->dataArray);
+            $data['sale_price'] = isset($request['sale_price']) ? $request['sale_price'] : null;
+
+            if ($setting->options["isProductReview"]) {
+                $data['status'] = $this->checkProductForPublish($request, $product);
+            }
+
             if ($request->product_type == ProductType::VARIABLE) {
                 $data['price'] = NULL;
                 $data['sale_price'] = NULL;
@@ -283,8 +433,8 @@ class ProductRepository extends BaseRepository
             }
 
             if (!empty($request->slug) &&  $request->slug != $product->slug) {
-                $stringifySlug = $this->customSlugify($request->slug);
-                $data['slug'] = $stringifySlug;
+                $stringifySlug = $this->makeSlug($request);
+                $data['slug'] = $this->makeSlug($request);
 
                 if (TRANSLATION_ENABLED) {
                     $this->where('slug', $product->slug)->where('id', '!=', $product->id)->update([
@@ -301,7 +451,7 @@ class ProductRepository extends BaseRepository
             $product->save();
 
             if (TRANSLATION_ENABLED) {
-                $this->where('sku', $product->sku)->where('id', '!=',  $product->id)->update([
+                $this->where('sku', $product->sku)->where('id', '=',  $product->id)->update([
                     'price' => $product->price,
                     'sale_price' => $product->sale_price,
                     'max_price' => $product->max_price,
@@ -311,9 +461,53 @@ class ProductRepository extends BaseRepository
                 ]);
             }
             return $product;
-        } catch (ValidatorException $e) {
-            throw new MarvelException(SOMETHING_WENT_WRONG);
+        } catch (Exception $e) {
+            throw $e;
         }
+    }
+
+    /**
+     * getBestSellingProducts
+     *
+     * @param $request
+     * @return void
+     */
+
+    public function getBestSellingProducts($request)
+    {
+        $limit = $request->limit ? $request->limit : 10;
+        $language = $request->language ?? DEFAULT_LANGUAGE;
+        $range = !empty($request->range) && $request->range !== 'undefined'  ? $request->range : '';
+        $type_id = $request->type_id ? $request->type_id : '';
+        if (isset($request->type_slug) && empty($type_id)) {
+            try {
+                $type = Type::where('slug', $request->type_slug)->where('language', $language)->firstOrFail();
+                $type_id = $type->id;
+            } catch (ModelNotFoundException $e) {
+                throw new MarvelException(NOT_FOUND);
+            }
+        }
+
+        $products_query = Product::leftJoin('order_product', 'order_product.product_id', 'products.id')
+            ->leftJoin('orders', 'order_product.order_id', '=', 'orders.id')
+            ->with(['type', 'shop'])
+            ->selectRaw('products.*, sum(order_product.order_quantity) total_sales')
+            ->where('orders.parent_id', null)
+            ->where('orders.order_status', 'order-completed')
+            ->where('orders.language', $language)
+            ->groupBy('order_product.product_id')
+            ->orderBy('total_sales', 'desc');
+
+        if (isset($request->shop_id)) {
+            $products_query = $products_query->where('shop_id', "=", $request->shop_id);
+        }
+        if ($range) {
+            $products_query = $products_query->whereDate('created_at', '>', Carbon::now()->subDays($range));
+        }
+        if ($type_id) {
+            $products_query = $products_query->where('type_id', '=', $type_id);
+        }
+        return $products_query->take($limit)->get();
     }
 
     public function fetchRelated($slug, $limit = 10, $language = DEFAULT_LANGUAGE)
@@ -352,7 +546,7 @@ class ProductRepository extends BaseRepository
         try {
             $product = Product::findOrFail($productId);
         } catch (\Throwable $th) {
-            throw new MarvelException(NOT_FOUND);
+            throw $th;
         }
 
         foreach ($_blockedDates as $singleDate) {
@@ -382,7 +576,7 @@ class ProductRepository extends BaseRepository
         try {
             $variation = Variation::findOrFail($variationId);
         } catch (\Throwable $th) {
-            throw new MarvelException(NOT_FOUND);
+            throw $th;
         }
 
         foreach ($_blockedDates as $singleDate) {
@@ -443,7 +637,7 @@ class ProductRepository extends BaseRepository
         try {
             $product = Product::findOrFail($product_id);
         } catch (\Throwable $th) {
-            throw new MarvelException(NOT_FOUND);
+            throw $th;
         }
         return $product->sale_price ? $product->sale_price : $product->price;
     }
@@ -453,7 +647,7 @@ class ProductRepository extends BaseRepository
         try {
             $variation = Variation::findOrFail($variation_id);
         } catch (\Throwable $th) {
-            throw new MarvelException(NOT_FOUND);
+            throw $th;
         }
         return $variation->sale_price ? $variation->sale_price : $variation->price;
     }
@@ -463,7 +657,7 @@ class ProductRepository extends BaseRepository
         try {
             $location = Resource::findOrFail($location_id);
         } catch (\Throwable $th) {
-            throw new MarvelException(NOT_FOUND);
+            throw $th;
         }
         return $location->price;
     }
@@ -475,7 +669,7 @@ class ProductRepository extends BaseRepository
             try {
                 $resource = Resource::findOrFail($resource_id);
             } catch (\Throwable $th) {
-                throw new MarvelException(NOT_FOUND);
+                throw $th;
             }
             if ($resource->price) {
                 $price += $resource->price;
@@ -486,7 +680,7 @@ class ProductRepository extends BaseRepository
 
     public function customSlugify($text, string $divider = '-')
     {
-        $slug      = str_replace(' ', '-', $text);
+        $slug      = preg_replace('~[^\pL\d]+~u', $divider, $text);
         $slugCount = Product::where('slug', $slug)->orWhere('slug', 'like',  $slug . '%')->count();
 
         if (empty($slugCount)) {

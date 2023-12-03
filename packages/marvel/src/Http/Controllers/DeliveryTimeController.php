@@ -2,6 +2,7 @@
 
 namespace Marvel\Http\Controllers;
 
+use Exception;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -42,7 +43,11 @@ class DeliveryTimeController extends CoreController
      */
     public function store(DeliveryTimeRequest $request)
     {
-        return $this->repository->create($request->validated());
+        try {
+            return $this->repository->create($request->validated());
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_CREATE_THE_RESOURCE);
+        }
     }
 
     /**
@@ -56,7 +61,7 @@ class DeliveryTimeController extends CoreController
         try {
             $language = $request->language ?? DEFAULT_LANGUAGE;
             return $this->repository->where('id', $params)->where('language', $language)->firstOrFail();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -70,7 +75,15 @@ class DeliveryTimeController extends CoreController
      */
     public function update(DeliveryTimeRequest $request, $id)
     {
-        return $this->repository->findOrFail($id)->update($request->validated());
+        try {
+            try {
+                return $this->repository->findOrFail($id)->update($request->validated());
+            } catch (\Throwable $th) {
+                abort(400, COULD_NOT_UPDATE_THE_RESOURCE);
+            }
+        } catch (MarvelException $e) {
+            throw new MarvelException(COULD_NOT_UPDATE_THE_RESOURCE);
+        }
     }
 
     /**
@@ -83,7 +96,7 @@ class DeliveryTimeController extends CoreController
     {
         try {
             return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }

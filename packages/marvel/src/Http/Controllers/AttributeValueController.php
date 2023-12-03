@@ -2,12 +2,17 @@
 
 namespace Marvel\Http\Controllers;
 
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Marvel\Database\Repositories\AttributeValueRepository;
+use Marvel\Exceptions\MarvelException;
 use Marvel\Http\Requests\AttributeValueRequest;
+use Marvel\Http\Resources\AttributeValueResource;
 use Prettus\Validator\Exceptions\ValidatorException;
+use Symfony\Component\HttpFoundation\Exception\BadRequestException;
 
 class AttributeValueController extends CoreController
 {
@@ -26,7 +31,8 @@ class AttributeValueController extends CoreController
      */
     public function index(Request $request)
     {
-        return $this->repository->with('attribute')->all();
+        $attributesValue = $this->repository->with('attribute')->all();
+        return AttributeValueResource::collection($attributesValue);
     }
 
     /**
@@ -38,11 +44,14 @@ class AttributeValueController extends CoreController
      */
     public function store(AttributeValueRequest $request)
     {
-        if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
-            $validatedData = $request->validated();
-            return $this->repository->create($validatedData);
-        } else {
-            // custom permission error message
+        try {
+            if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
+                $validatedData = $request->validated();
+                return $this->repository->create($validatedData);
+            }
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $th) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
         }
     }
 
@@ -56,8 +65,8 @@ class AttributeValueController extends CoreController
     {
         try {
             return $this->repository->with('attribute')->findOrFail($id);
-        } catch (\Exception $e) {
-            return response()->json(['message' => 'Attribute Value not found!'], 404);
+        } catch (MarvelException $th) {
+            throw new MarvelException(NOT_FOUND);
         }
     }
 
@@ -71,11 +80,23 @@ class AttributeValueController extends CoreController
     public function update(AttributeValueRequest $request, $id)
     {
         try {
-            $validatedData = $request->all();
-            return $this->repository->findOrFail($id)->update($validatedData);
-        } catch (\Exception $e) {
-            return response()->json(['message' => 'Attribute Value not found!'], 404);
+            $request->id = $id;
+            return $this->updateAttributeValues($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_UPDATE_THE_RESOURCE);
         }
+    }
+    public function updateAttributeValues(AttributeValueRequest $request)
+    {
+        if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
+            try {
+                $validatedData = $request->except('id');
+                return $this->repository->findOrFail($request->id)->update($validatedData);
+            } catch (\Exception $e) {
+                throw new ModelNotFoundException(NOT_FOUND);
+            }
+        }
+        throw new AuthorizationException(NOT_AUTHORIZED);
     }
 
     /**
@@ -84,12 +105,29 @@ class AttributeValueController extends CoreController
      * @param int $id
      * @return JsonResponse
      */
-    public function destroy($id)
+    public function destroy($id, Request $request)
     {
         try {
-            return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
-            return response()->json(['message' => 'Attribute Value not found!'], 404);
+            $request->id = $id;
+            return $this->destroyAttributeValues($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_DELETE_THE_RESOURCE);
         }
+    }
+    /**
+     * It deletes an attribute from the database
+     * 
+     * @param Request request The request object.
+     * @return JsonResponse
+     */
+    public function destroyAttributeValues(Request $request)
+    {
+        $shop_id = $this->repository->findOrFail($request->id)->attribute->shop_id;
+        if ($this->repository->hasPermission($request->user(), $shop_id)) {
+            $attributesValue =  $this->repository->findOrFail($request->id);
+            $attributesValue->delete();
+            return $attributesValue;
+        }
+        throw new AuthorizationException(NOT_AUTHORIZED);
     }
 }

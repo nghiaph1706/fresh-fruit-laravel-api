@@ -3,6 +3,7 @@
 namespace Marvel\Http\Controllers;
 
 use Exception;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -10,6 +11,8 @@ use Marvel\Database\Models\Manufacturer;
 use Marvel\Database\Repositories\ManufacturerRepository;
 use Marvel\Exceptions\MarvelException;
 use Marvel\Http\Requests\ManufacturerRequest;
+use Marvel\Http\Resources\ManufacturerResource;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class ManufacturerController extends CoreController
 {
@@ -31,7 +34,9 @@ class ManufacturerController extends CoreController
     {
         $language = $request->language ?? DEFAULT_LANGUAGE;
         $limit = $request->limit ?   $request->limit : 15;
-        return $this->repository->where('language', $language)->with('type')->paginate($limit);
+        $manufacturers = $this->repository->where('language', $language)->with('type')->paginate($limit);
+        $data = ManufacturerResource::collection($manufacturers)->response()->getData(true);
+        return formatAPIResourcePaginate($data);
     }
 
     /**
@@ -42,9 +47,12 @@ class ManufacturerController extends CoreController
      */
     public function store(ManufacturerRequest $request)
     {
-        if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
-            return $this->repository->storeManufacturer($request);
-        } else {
+        try {
+            if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
+                return $this->repository->storeManufacturer($request);
+            }
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $th) {
             throw new MarvelException(NOT_AUTHORIZED);
         }
     }
@@ -57,8 +65,13 @@ class ManufacturerController extends CoreController
      */
     public function show(Request $request, $slug)
     {
-        $request->slug = $slug;
-        return $this->fetchManufacturer($request);
+        try {
+            $request['slug'] = $slug;
+            $manufacturer = $this->fetchManufacturer($request);
+            return new ManufacturerResource($manufacturer);
+        } catch (MarvelException $th) {
+            throw new MarvelException(NOT_FOUND);
+        }
     }
 
     /**
@@ -78,8 +91,8 @@ class ManufacturerController extends CoreController
                 return $this->repository->with('type')->where('id', $slug)->firstOrFail();
             }
             return $this->repository->with('type')->where('slug', $slug)->where('language', $language)->firstOrFail();
-        } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
+        } catch (Exception $th) {
+            throw new HttpException(404, NOT_FOUND);
         }
     }
 
@@ -92,8 +105,12 @@ class ManufacturerController extends CoreController
      */
     public function update(ManufacturerRequest $request, $id)
     {
-        $request->id = $id;
-        return $this->updateManufacturer($request);
+        try {
+            $request['id'] = $id;
+            return $this->updateManufacturer($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_UPDATE_THE_RESOURCE);
+        }
     }
 
     public function updateManufacturer(Request $request)
@@ -102,12 +119,11 @@ class ManufacturerController extends CoreController
             try {
                 $Manufacturer = $this->repository->findOrFail($request->id);
             } catch (\Exception $e) {
-                throw new MarvelException(NOT_FOUND);
+                throw new HttpException(404, NOT_FOUND);
             }
             return $this->repository->updateManufacturer($request, $Manufacturer);
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
         }
+        throw new AuthorizationException(NOT_AUTHORIZED);
     }
 
     /**
@@ -116,13 +132,24 @@ class ManufacturerController extends CoreController
      * @param $id
      * @return JsonResponse
      */
-    public function destroy($id)
+    public function destroy($id, Request $request)
     {
         try {
-            return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
+            $request['id'] = $id;
+            return $this->deleteManufacturer($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_DELETE_THE_RESOURCE);
         }
+    }
+
+    public function deleteManufacturer(Request $request)
+    {
+        if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
+            $manufacturer = $this->repository->findOrFail($request->id);
+            $manufacturer->delete();
+            return $manufacturer;
+        }
+        throw new MarvelException(NOT_AUTHORIZED);
     }
 
     public function topManufacturer(Request $request)

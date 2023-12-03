@@ -41,7 +41,11 @@ class LanguageController extends CoreController
      */
     public function store(LanguageRequest $request)
     {
-        return $this->repository->create($request->validated());
+        try {
+            return $this->repository->create($request->validated());
+        } catch (MarvelException $e) {
+            throw new MarvelException(COULD_NOT_CREATE_THE_RESOURCE);
+        }
     }
 
     /**
@@ -54,7 +58,7 @@ class LanguageController extends CoreController
     {
         try {
             return $this->repository->where('id', $params)->firstOrFail();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -68,7 +72,11 @@ class LanguageController extends CoreController
      */
     public function update(LanguageRequest $request, $id)
     {
-        return $this->repository->findOrFail($id)->update($request->validated());
+        try {
+            return $this->repository->findOrFail($id)->update($request->validated());
+        } catch (MarvelException $e) {
+            throw new MarvelException(COULD_NOT_UPDATE_THE_RESOURCE);
+        }
     }
 
     /**
@@ -81,7 +89,7 @@ class LanguageController extends CoreController
     {
         try {
             return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }

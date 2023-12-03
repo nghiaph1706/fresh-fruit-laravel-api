@@ -2,6 +2,8 @@
 
 namespace Marvel\Http\Controllers;
 
+use Exception;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Arr;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -9,7 +11,10 @@ use Illuminate\Support\Facades\Log;
 use Marvel\Exceptions\MarvelException;
 use Marvel\Http\Requests\AttributeRequest;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Marvel\Database\Repositories\AttributeRepository;
+use Marvel\Http\Resources\AttributeResource;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class AttributeController extends CoreController
 {
@@ -30,7 +35,8 @@ class AttributeController extends CoreController
     public function index(Request $request)
     {
         $language = $request->language ?? DEFAULT_LANGUAGE;
-        return $this->repository->where('language', $language)->with(['values', 'shop'])->get();
+        $attributes = $this->repository->where('language', $language)->with(['values', 'shop'])->get();
+        return AttributeResource::collection($attributes);
     }
 
     /**
@@ -42,10 +48,13 @@ class AttributeController extends CoreController
      */
     public function store(AttributeRequest $request)
     {
-        if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
-            return $this->repository->storeAttribute($request);
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
+        try {
+            if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
+                return $this->repository->storeAttribute($request);
+            }
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $e) {
+            throw new MarvelException(NOT_FOUND);
         }
     }
 
@@ -62,10 +71,12 @@ class AttributeController extends CoreController
             $language = $request->language ?? DEFAULT_LANGUAGE;
             if (is_numeric($params)) {
                 $params = (int) $params;
-                return $this->repository->with('values')->where('id', $params)->firstOrFail();
+                $attribute = $this->repository->with('values')->where('id', $params)->firstOrFail();
+                return new AttributeResource($attribute);
             }
-            return $this->repository->with('values')->where('slug', $params)->where('language', $language)->firstOrFail();
-        } catch (\Exception $e) {
+            $attribute = $this->repository->with('values')->where('slug', $params)->where('language', $language)->firstOrFail();
+            return new AttributeResource($attribute);
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -79,8 +90,12 @@ class AttributeController extends CoreController
      */
     public function update(AttributeRequest $request, $id)
     {
-        $request->id = $id;
-        return $this->updateAttribute($request);
+        try {
+            $request->id = $id;
+            return $this->updateAttribute($request);
+        } catch (MarvelException $e) {
+            throw new MarvelException(COULD_NOT_DELETE_THE_RESOURCE);
+        }
     }
 
     public function updateAttribute(AttributeRequest $request)
@@ -90,12 +105,11 @@ class AttributeController extends CoreController
             try {
                 $attribute = $this->repository->with('values')->findOrFail($request->id);
             } catch (\Exception $e) {
-                throw new MarvelException(NOT_FOUND);
+                throw new HttpException(404, NOT_FOUND);
             }
             return $this->repository->updateAttribute($request, $attribute);
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
         }
+        throw new AuthorizationException(NOT_AUTHORIZED);
     }
 
     /**
@@ -106,8 +120,12 @@ class AttributeController extends CoreController
      */
     public function destroy(Request $request, $id)
     {
-        $request->id = $id;
-        return $this->deleteAttribute($request);
+        try {
+            $request->id = $id;
+            return $this->deleteAttribute($request);
+        } catch (MarvelException $e) {
+            throw new MarvelException(COULD_NOT_DELETE_THE_RESOURCE);
+        }
     }
 
     public function deleteAttribute(Request $request)
@@ -115,14 +133,13 @@ class AttributeController extends CoreController
         try {
             $attribute = $this->repository->findOrFail($request->id);
         } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
+            throw new HttpException(404, NOT_FOUND);
         }
         if ($this->repository->hasPermission($request->user(), $attribute->shop->id)) {
             $attribute->delete();
             return $attribute;
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
         }
+        throw new AuthorizationException(NOT_AUTHORIZED);
     }
 
     public function exportAttributes(Request $request, $shop_id)

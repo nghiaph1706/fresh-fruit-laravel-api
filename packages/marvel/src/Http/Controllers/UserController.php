@@ -4,57 +4,150 @@ namespace Marvel\Http\Controllers;
 
 use Carbon\Carbon;
 use Exception;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Auth\Events\Registered;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Redirect;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Laravel\Socialite\Facades\Socialite;
 use Marvel\Database\Models\Product;
 use Marvel\Database\Models\Profile;
+use Marvel\Database\Models\Settings;
 use Marvel\Database\Models\Shop;
 use Marvel\Database\Models\User;
 use Marvel\Database\Models\Wallet;
 use Marvel\Database\Repositories\UserRepository;
 use Marvel\Enums\Permission;
+use Marvel\Enums\Role;
+use Marvel\Events\ProcessUserData;
 use Marvel\Exceptions\MarvelException;
+use Marvel\Exceptions\MarvelNotFoundException;
 use Marvel\Http\Requests\ChangePasswordRequest;
+use Marvel\Http\Requests\LicenseRequest;
 use Marvel\Http\Requests\UserCreateRequest;
 use Marvel\Http\Requests\UserUpdateRequest;
 use Marvel\Http\Resources\UserResource;
 use Marvel\Mail\ContactAdmin;
 use Marvel\Otp\Gateways\OtpGateway;
+use Marvel\Traits\UsersTrait;
 use Marvel\Traits\WalletsTrait;
-use Newsletter;
+use Spatie\Newsletter\Facades\Newsletter;
 
 class UserController extends CoreController
 {
-    use WalletsTrait;
+    use WalletsTrait, UsersTrait;
 
     public $repository;
+    private bool $applicationIsValid;
+    private array $appData;
 
     public function __construct(UserRepository $repository)
     {
         $this->repository = $repository;
+        $this->applicationIsValid = $this->repository->checkIfApplicationIsValid();
+    }
+    /**
+     * Validate user email from the link sent to the user.
+     * @param  $id
+     * @param  $hash
+     * @return RedirectResponse
+     */
+    public function verifyEmail($id, $hash): RedirectResponse
+    {
+        $user = User::findOrFail($id);
+        if (!hash_equals((string) $hash, sha1($user->getEmailForVerification()))) {
+            abort(403);
+        }
+        if ($user->hasVerifiedEmail()) {
+            if ($user->hasPermissionTo(Permission::SUPER_ADMIN) || $user->hasPermissionTo(Permission::STORE_OWNER)) {
+                return Redirect::away(config('shop.dashboard_url'));
+            } else {
+                return Redirect::away(config('shop.shop_url'));
+            }
+        }
+        $user->markEmailAsVerified();
+        if ($user->hasPermissionTo(Permission::SUPER_ADMIN) || $user->hasPermissionTo(Permission::STORE_OWNER)) {
+            return Redirect::away(config('shop.dashboard_url'));
+        } else {
+            return Redirect::away(config('shop.shop_url'));
+        }
+    }
+    /**
+     * Send the email verification notification.
+     *
+     * @return JsonResponse
+     */
+    public function sendVerificationEmail(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $user->sendEmailVerificationNotification();
+        return response()->json(['message' => 'Email verification link sent on your email id', 'success' => true]);
     }
 
+
     /**
-     * Return the admins list
+     * admins
      *
      * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection
      */
-
-    public function admins()
+    public function admins(Request $request)
     {
-        $admins = User::with('profile')
+        $limit = $request->limit ? $request->limit : 15;
+        $admins = $this->repository
+            ->with(['profile', 'address', 'permissions'])
             ->where('is_active', true)
             ->whereHas('permissions', function ($query) {
                 $query->where('name', Permission::SUPER_ADMIN);
-            })->get();
-        return UserResource::collection($admins);
+            })
+            ->paginate($limit);
+        return $admins;
+        // return UserResource::collection($admins);
+    }
 
+    /**
+     * vendors
+     *
+     * @param  Request $request
+     * @return void
+     */
+    public function vendors(Request $request)
+    {
+        $limit = $request->limit ? $request->limit : 15;
 
+        return $this->fetchVendors($request)->paginate($limit);
+    }
+
+    public function fetchVendors(Request $request)
+    {
+        $user = $request->user();
+        $is_active = $request->is_active === 'true' ? true : false;
+        if ($this->repository->hasPermission($user)) {
+            return $this->repository->permission(Permission::STORE_OWNER)->where('is_active', $is_active);
+        }
+        return $this->repository->permission(null);
+    }
+
+    /**
+     * customers
+     *
+     * @param  Request $request
+     * @return void
+     */
+    public function customers(Request $request)
+    {
+        $limit = $request->limit ? $request->limit : 15;
+        return $this->repository->with(['profile', 'address', 'permissions'])->whereHas('permissions', function ($query) {
+            $query->where('name', Permission::CUSTOMER);
+        })->paginate($limit);
     }
 
 
@@ -78,7 +171,11 @@ class UserController extends CoreController
      */
     public function store(UserCreateRequest $request)
     {
-        return $this->repository->storeUser($request);
+        try {
+            return $this->repository->storeUser($request);
+        } catch (MarvelException $e) {
+            throw new MarvelException(NOT_FOUND);
+        }
     }
 
     /**
@@ -91,7 +188,7 @@ class UserController extends CoreController
     {
         try {
             return $this->repository->with(['profile', 'address', 'shops', 'managed_shop'])->findOrFail($id);
-        } catch (Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -124,19 +221,23 @@ class UserController extends CoreController
     {
         try {
             return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
 
     public function me(Request $request)
     {
-        $user = $request->user();
+        try {
+            $user = $request->user();
 
-        if (isset($user)) {
-            return $this->repository->with(['profile', 'wallet', 'address', 'shops.balance', 'managed_shop.balance'])->find($user->id);
+            if (isset($user)) {
+                return $this->repository->with(['profile', 'wallet', 'address', 'shops.balance', 'managed_shop.balance'])->find($user->id);
+            }
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $e) {
+            throw new MarvelException(NOT_AUTHORIZED);
         }
-        throw new MarvelException(NOT_AUTHORIZED);
     }
 
     public function token(Request $request)
@@ -148,10 +249,17 @@ class UserController extends CoreController
 
         $user = User::where('email', $request->email)->where('is_active', true)->first();
 
-        if (!$user || !Hash::check($request->password, $user->password)) {
+        if (!$user || !Hash::check($request->password, $user->password) || !$this->applicationIsValid) {
             return ["token" => null, "permissions" => []];
         }
-        return ["token" => $user->createToken('auth_token')->plainTextToken, "permissions" => $user->getPermissionNames()];
+        $email_verified = $user->hasVerifiedEmail();
+        event(new ProcessUserData());
+        return [
+            "token" => $user->createToken('auth_token')->plainTextToken,
+            "permissions" => $user->getPermissionNames(),
+            "email_verified" => $email_verified,
+            "role" => $user->getRoleNames()->first()
+        ];
     }
 
     public function logout(Request $request)
@@ -167,11 +275,13 @@ class UserController extends CoreController
     {
         $notAllowedPermissions = [Permission::SUPER_ADMIN];
         if ((isset($request->permission->value) && in_array($request->permission->value, $notAllowedPermissions)) || (isset($request->permission) && in_array($request->permission, $notAllowedPermissions))) {
-            throw new MarvelException(NOT_AUTHORIZED);
+            throw new AuthorizationException(NOT_AUTHORIZED);
         }
         $permissions = [Permission::CUSTOMER];
+        $role = Role::CUSTOMER;
         if (isset($request->permission)) {
             $permissions[] = isset($request->permission->value) ? $request->permission->value : $request->permission;
+            $role = Role::STORE_OWNER;
         }
         $user = $this->repository->create([
             'name'     => $request->name,
@@ -180,21 +290,35 @@ class UserController extends CoreController
         ]);
 
         $user->givePermissionTo($permissions);
+        $user->assignRole($role);
         $this->giveSignupPointsToCustomer($user->id);
-        return ["token" => $user->createToken('auth_token')->plainTextToken, "permissions" => $user->getPermissionNames()];
+        $setting = Settings::first();
+        $useMustVerifyEmail = isset($setting->options['useMustVerifyEmail']) ? $setting->options['useMustVerifyEmail'] : false;
+        if ($useMustVerifyEmail) {
+            event(new Registered($user));
+        }
+        event(new ProcessUserData());
+        return [
+            "token" => $user->createToken('auth_token')->plainTextToken,
+            "permissions" => $user->getPermissionNames(),
+            "role" => $user->getRoleNames()->first()
+        ];
     }
 
     public function banUser(Request $request)
     {
-        $user = $request->user();
-        if ($user && $user->hasPermissionTo(Permission::SUPER_ADMIN) && $user->id != $request->id) {
-            $banUser =  User::find($request->id);
-            $banUser->is_active = false;
-            $banUser->save();
-            $this->inactiveUserShops($banUser->id);
-            return $banUser;
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
+        try {
+            $user = $request->user();
+            if ($user && $user->hasPermissionTo(Permission::SUPER_ADMIN) && $user->id != $request->id) {
+                $banUser =  User::find($request->id);
+                $banUser->is_active = false;
+                $banUser->save();
+                $this->inactiveUserShops($banUser->id);
+                return $banUser;
+            }
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $th) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
         }
     }
     function inactiveUserShops($userId)
@@ -209,14 +333,17 @@ class UserController extends CoreController
 
     public function activeUser(Request $request)
     {
-        $user = $request->user();
-        if ($user && $user->hasPermissionTo(Permission::SUPER_ADMIN) && $user->id != $request->id) {
-            $activeUser =  User::find($request->id);
-            $activeUser->is_active = true;
-            $activeUser->save();
-            return $activeUser;
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
+        try {
+            $user = $request->user();
+            if ($user && $user->hasPermissionTo(Permission::SUPER_ADMIN) && $user->id != $request->id) {
+                $activeUser =  User::find($request->id);
+                $activeUser->is_active = true;
+                $activeUser->save();
+                return $activeUser;
+            }
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $th) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
         }
     }
 
@@ -295,8 +422,17 @@ class UserController extends CoreController
     public function contactAdmin(Request $request)
     {
         try {
+            $listedAdmin = [];
+            $admins = $this->getAdminUsers();
+            if (isset($admins)) {
+                foreach ($admins as $key => $admin) {
+                    array_push($listedAdmin, $admin->email);
+                }
+            }
             $details = $request->only('subject', 'name', 'email', 'description');
-            Mail::to(config('shop.admin_email'))->send(new ContactAdmin($details));
+            // config('shop.admin_email')
+            $emailTo = isset($request['emailTo']) ? $request['emailTo'] : $listedAdmin;
+            Mail::to($emailTo)->send(new ContactAdmin($details));
             return ['message' => EMAIL_SENT_SUCCESSFUL, 'success' => true];
         } catch (\Exception $e) {
             throw new MarvelException(SOMETHING_WENT_WRONG);
@@ -305,13 +441,16 @@ class UserController extends CoreController
 
     public function fetchStaff(Request $request)
     {
-        if (!isset($request->shop_id)) {
-            throw new MarvelException(NOT_AUTHORIZED);
-        }
-        if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
-            return $this->repository->with(['profile'])->where('shop_id', '=', $request->shop_id);
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
+        try {
+            if (!isset($request->shop_id)) {
+                throw new AuthorizationException(NOT_AUTHORIZED);
+            }
+            if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
+                return $this->repository->with(['profile'])->where('shop_id', '=', $request->shop_id);
+            }
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $e) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
         }
     }
 
@@ -362,13 +501,18 @@ class UserController extends CoreController
 
             if (!$userCreated->hasPermissionTo(Permission::CUSTOMER)) {
                 $userCreated->givePermissionTo(Permission::CUSTOMER);
+                $userCreated->assignRole(Role::CUSTOMER);
             }
 
             if (empty($userExist)) {
                 $this->giveSignupPointsToCustomer($userCreated->id);
             }
-
-            return ["token" => $userCreated->createToken('auth_token')->plainTextToken, "permissions" => $userCreated->getPermissionNames()];
+            event(new ProcessUserData());
+            return [
+                "token" => $userCreated->createToken('auth_token')->plainTextToken,
+                "permissions" => $userCreated->getPermissionNames(),
+                "role" => $userCreated->getRoleNames()->first()
+            ];
         } catch (\Exception $e) {
             throw new MarvelException(INVALID_CREDENTIALS);
         }
@@ -423,7 +567,7 @@ class UserController extends CoreController
                 'phone_number' => $phoneNumber,
                 'is_contact_exist' => $profile ? true : false
             ];
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(INVALID_GATEWAY);
         }
     }
@@ -464,6 +608,8 @@ class UserController extends CoreController
                             'name'    => $name,
                         ]);
                         $user->givePermissionTo(Permission::CUSTOMER);
+                        $user->assignRole(Role::CUSTOMER);
+
                         $user->profile()->updateOrCreate(
                             ['customer_id' => $user->id],
                             [
@@ -479,10 +625,11 @@ class UserController extends CoreController
                 } else {
                     $user = User::where('id', $profile->customer_id)->first();
                 }
-
+                event(new ProcessUserData());
                 return [
                     "token" => $user->createToken('auth_token')->plainTextToken,
-                    "permissions" => $user->getPermissionNames()
+                    "permissions" => $user->getPermissionNames(),
+                    "role" => $user->getRoleNames()->first()
                 ];
             }
             return ['message' => OTP_VERIFICATION_FAILED, 'success' => false];
@@ -540,12 +687,14 @@ class UserController extends CoreController
                 $newUser = $this->repository->findOrFail($user_id);
                 if ($newUser->hasPermissionTo(Permission::SUPER_ADMIN)) {
                     $newUser->revokePermissionTo(Permission::SUPER_ADMIN);
+                    $newUser->removeRole(Role::SUPER_ADMIN);
                     return true;
                 }
             } catch (Exception $e) {
                 throw new MarvelException(USER_NOT_FOUND);
             }
             $newUser->givePermissionTo(Permission::SUPER_ADMIN);
+            $newUser->assignRole(Role::SUPER_ADMIN);
 
             return true;
         }
@@ -556,10 +705,102 @@ class UserController extends CoreController
     {
         try {
             $email = $request->email;
-            Newsletter::subscribe($email);
+            Newsletter::subscribeOrUpdate($email);
             return true;
-        } catch (\Throwable $th) {
+        } catch (MarvelException $th) {
             throw new MarvelException(SOMETHING_WENT_WRONG);
         }
+    }
+    public function updateUserEmail(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email|unique:users,email',
+        ]);
+        if ($validator->fails()) {
+            throw new MarvelException($validator->errors()->first());
+        }
+        return $this->repository->updateEmail($request);
+    }
+
+    public function myStaffs(Request $request)
+    {
+        $limit = $request->limit ? $request->limit : 15;
+        return $this->fetchMyStaffs($request)->paginate($limit);
+    }
+    public function fetchMyStaffs(Request $request)
+    {
+        $user = $request->user();
+        if ($this->repository->hasPermission($user, $request->shop_id)) {
+            return $this->repository->whereRelation('managed_shop', 'owner_id', '=', $user->id);
+        }
+        return $this->repository->whereRelation('managed_shop', 'owner_id', '=', null);
+    }
+
+    public function allStaffs(Request $request)
+    {
+        $user = $request->user();
+        $limit = $request->limit ? $request->limit : 15;
+        if ($this->repository->hasPermission($user)) {
+            return $this->repository->permission(Permission::STAFF)->paginate($limit);
+        }
+        return $this->repository->permission(null)->paginate($limit);
+    }
+
+
+    public function verifyLicenseKey(LicenseRequest $request)
+    {
+        try {
+            $licenseKey = $request->license_key;
+            $isValid = $this->licenseKeyValidator($licenseKey);
+            if (!$isValid) {
+                throw new MarvelNotFoundException("Invalid Key");
+            }
+            return $this->modifySettingsData();
+        } catch (MarvelException $th) {
+            throw new MarvelException("Invalid Key");
+        }
+    }
+
+    private function licenseKeyValidator(string $licenseKey): bool
+    {
+        $apiData = getConfigFromApi($licenseKey);
+        $isValidated = $apiData["trust"];
+        $this->appData = [
+            ...$apiData,
+            'last_checking_time' => Carbon::now(),
+            'trust' => $isValidated,
+            'license_key' => $licenseKey,
+        ];
+        setConfig($this->appData);
+
+        if (!$isValidated) {
+            throw new MarvelNotFoundException(NOT_FOUND);
+        }
+        return true;
+    }
+    private function modifySettingsData(): void
+    {
+        $language = isset(request()['language']) ? request()['language'] : DEFAULT_LANGUAGE;
+        Cache::flush();
+        $settings = Settings::getData($language);
+        $settings->update([
+            'options' => [
+                ...$settings->options,
+                'app_settings' => [
+                    'last_checking_time' => $this->appData['last_checking_time'],
+                    'trust' => $this->appData['trust'],
+                ]
+            ]
+        ]);
+    }
+    public function fetchUsersByPermission(Request $request)
+    {
+        $user = $request->user() ?? null;
+        $permission = strtolower($request->permission) ?? true;
+        $is_active = $request->is_active ?? true;
+        if ($this->repository->hasPermission($user)) {
+            return $this->repository->permission($permission)->where('is_active', $is_active);
+        }
+        return $this->repository->permission(null);
     }
 }

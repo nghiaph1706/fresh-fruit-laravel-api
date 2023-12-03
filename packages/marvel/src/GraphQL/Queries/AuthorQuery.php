@@ -13,4 +13,8 @@ class AuthorQuery
     {
         return Shop::call('Marvel\Http\Controllers\AuthorController@topAuthor', $args);
     }
+    public function fetchAuthors($rootValue, array $args, GraphQLContext $context)
+    {
+        return Shop::call('Marvel\Http\Controllers\AuthorController@fetchAuthors', $args);
+    }
 }

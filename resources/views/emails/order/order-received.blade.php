@@ -1,14 +1,22 @@
 {{--$order collection is available here--}}
 
 @component('mail::message')
-# New Order Received!
+@if($receiver == 'admin')
+    # {{ __('sms.order.orderCreated.admin.subject') }}
 
-You have received a new order. Order tracking id {{$order->tracking_number}}
+    {{ __('sms.order.orderCreated.admin.message',['ORDER_TRACKING_NUMBER'=>$order->tracking_number,'customer_name'=>$customer]) }}
+@else
+    # {{ __('sms.order.orderCreated.storeOwner.subject') }}
+
+    {{ __('sms.order.orderCreated.storeOwner.message',['ORDER_TRACKING_NUMBER'=>$order->tracking_number,'customer_name'=>$customer]) }}
+@endif
+
+
 
 @component('mail::button', ['url' => $url ])
-View Order
+    {{__('common.view-order')}}
 @endcomponent
 
-Thanks,<br>
+{{__('common.thanks')}},<br>
 {{ config('app.name') }}
 @endcomponent

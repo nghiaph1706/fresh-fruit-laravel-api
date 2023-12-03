@@ -6,9 +6,11 @@ use Illuminate\Http\Request;
 use Marvel\Database\Models\PaymentMethod;
 use Marvel\Database\Repositories\PaymentMethodRepository;
 use Marvel\Database\Models\Settings;
+use Marvel\Exceptions\MarvelException;
 use Marvel\Facades\Payment;
 use Marvel\Http\Requests\PaymentMethodCreateRequest;
 use Marvel\Traits\PaymentTrait;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class PaymentMethodController extends CoreController
 {
@@ -45,8 +47,9 @@ class PaymentMethodController extends CoreController
      */
     public function index(Request $request)
     {
+        // currently stripe has only card saving feature available. So, it's hardcoded here. In case of future it can be processed based on the selected payment gateway for saving cards
         $user = $request->user();
-        return $this->repository->with('payment_gateways')->whereRelation('payment_gateways', 'user_id', $user->id)->whereRelation('payment_gateways', 'gateway_name', $this->settings->options['paymentGateway'])->get();
+        return $this->repository->with('payment_gateways')->whereRelation('payment_gateways', 'user_id', $user->id)->whereRelation('payment_gateways', 'gateway_name', 'stripe')->get();
     }
 
     /**
@@ -59,7 +62,11 @@ class PaymentMethodController extends CoreController
      */
     public function store(PaymentMethodCreateRequest $request)
     {
-        return $this->repository->storeCards($request, $this->settings);
+        try {
+            return $this->repository->storeCards($request, $this->settings);
+        } catch (MarvelException $e) {
+            throw new MarvelException(COULD_NOT_CREATE_THE_RESOURCE);
+        }
     }
 
     /**
@@ -82,11 +89,15 @@ class PaymentMethodController extends CoreController
     public function deletePaymentMethod(Request $request)
     {
         try {
-            $retrieved_payment_method = PaymentMethod::where('id', '=', $request->id)->first();
-            Payment::detachPaymentMethodToCustomer($retrieved_payment_method->method_key);
-            return $this->repository->findOrFail($request->id)->forceDelete();
-        } catch (\Exception $e) {
-            throw $e;
+            try {
+                $retrieved_payment_method = PaymentMethod::where('id', '=', $request->id)->first();
+                Payment::detachPaymentMethodToCustomer($retrieved_payment_method->method_key);
+                return $this->repository->findOrFail($request->id)->forceDelete();
+            } catch (\Exception $e) {
+                throw new HttpException(409, COULD_NOT_DELETE_THE_RESOURCE);
+            }
+        } catch (MarvelException $e) {
+            throw new MarvelException(COULD_NOT_DELETE_THE_RESOURCE, $e->getMessage());
         }
     }
 
@@ -101,9 +112,9 @@ class PaymentMethodController extends CoreController
      */
     public function savePaymentMethod(Request $request)
     {
-        switch ($this->settings->options['paymentGateway']) {
+        switch ($request->payment_gateway) {
             case 'stripe':
-                return $this->repository->saveStripeCard($request, $this->settings);
+                return $this->repository->saveStripeCard($request);
                 break;
         }
     }
@@ -137,13 +148,16 @@ class PaymentMethodController extends CoreController
      */
     public function setDefaultCard(Request $request)
     {
+        try {
+            return $this->repository->setDefaultPaymentMethod($request);
+        } catch (MarvelException $e) {
+            throw new MarvelException(COULD_NOT_CREATE_THE_RESOURCE);
+        }
         // if system varies from payment-gateway to payment-gateway, then use this.
         // switch ($this->settings->options['paymentGateway']) {
         //     case 'stripe':
         //         $setDefaultPayment = $this->repository->setDefaultPaymentMethod($request);
         //         break;
         // }
-
-        return $this->repository->setDefaultPaymentMethod($request);
     }
 }

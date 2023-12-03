@@ -26,9 +26,16 @@ class UserQuery
     {
         return Shop::call('Marvel\Http\Controllers\ProductController@fetchWishlists', $args);
     }
-
     public function inWishlist($rootValue, array $args, GraphQLContext $context)
     {
         return Shop::call('Marvel\Http\Controllers\WishlistController@inWishlist', $args);
+    }
+    public function fetchMyStaffs($rootValue, array $args, GraphQLContext $context)
+    {
+        return Shop::call('Marvel\Http\Controllers\UserController@fetchMyStaffs', $args);
+    }
+    public function fetchUsersByPermission($rootValue, array $args, GraphQLContext $context)
+    {
+        return Shop::call('Marvel\Http\Controllers\UserController@fetchUsersByPermission', $args);
     }
 }

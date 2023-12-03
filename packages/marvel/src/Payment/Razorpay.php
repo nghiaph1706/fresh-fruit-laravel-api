@@ -5,13 +5,13 @@ namespace Marvel\Payments;
 use Exception;
 use Marvel\Database\Models\Order;
 use Marvel\Database\Models\PaymentIntent;
-use Marvel\Exceptions\MarvelException;
 use Marvel\Traits\PaymentTrait;
 use Razorpay\Api\Api;
 use Marvel\Enums\OrderStatus;
 use Marvel\Enums\PaymentStatus;
 use Razorpay\Api\Errors\SignatureVerificationError;
-use Str;
+use Illuminate\Support\Str;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Throwable;
 
 class Razorpay extends Base implements PaymentInterface
@@ -31,7 +31,7 @@ class Razorpay extends Base implements PaymentInterface
      *
      * @param $data
      * @return array
-     * @throws MarvelException
+     * @throws Exception
      */
     public function getIntent($data): array
     {
@@ -51,7 +51,7 @@ class Razorpay extends Base implements PaymentInterface
                 'is_redirect'           => false,
             ];
         } catch (Exception $e) {
-            throw new MarvelException(SOMETHING_WENT_WRONG_WITH_PAYMENT);
+            throw new HttpException(400, SOMETHING_WENT_WRONG_WITH_PAYMENT);
         }
     }
 
@@ -60,7 +60,7 @@ class Razorpay extends Base implements PaymentInterface
      *
      * @param $id
      * @return false|mixed
-     * @throws MarvelException
+     * @throws Exception
      */
     public function verify($id): mixed
     {
@@ -68,7 +68,7 @@ class Razorpay extends Base implements PaymentInterface
             $order = $this->api->order->fetch($id);
             return isset($order->status) ? $order->status : false;
         } catch (Exception $e) {
-            throw new MarvelException(SOMETHING_WENT_WRONG_WITH_PAYMENT);
+            throw new HttpException(400, SOMETHING_WENT_WRONG_WITH_PAYMENT);
         }
     }
 

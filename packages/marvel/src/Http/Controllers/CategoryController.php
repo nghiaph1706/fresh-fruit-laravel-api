@@ -11,6 +11,7 @@ use Marvel\Database\Repositories\CategoryRepository;
 use Marvel\Exceptions\MarvelException;
 use Marvel\Http\Requests\CategoryCreateRequest;
 use Marvel\Http\Requests\CategoryUpdateRequest;
+use Marvel\Http\Resources\CategoryResource;
 use Prettus\Validator\Exceptions\ValidatorException;
 
 
@@ -62,12 +63,22 @@ class CategoryController extends CoreController
     {
         $language = $request->language ?? DEFAULT_LANGUAGE;
         $parent = $request->parent;
-        $limit = $request->limit ?   $request->limit : 15;
+        $selfId = $request->self;
+        $limit = $request->limit ?? 15;
+
+        $categoriesQuery = $this->repository->with(['type', 'parent', 'children'])
+            ->where('language', $language);
+
         if ($parent === 'null') {
-            return $this->repository->with(['type', 'parent', 'children'])->where('parent', null)->where('language', $language)->paginate($limit);
-        } else {
-            return $this->repository->with(['type', 'parent', 'children'])->where('language', $language)->paginate($limit);
+            $categoriesQuery->whereNull('parent');
         }
+        if ($selfId) {
+            $categoriesQuery->where('id', '!=', $selfId);
+        }
+
+        $categories = $categoriesQuery->paginate($limit);
+        $data = CategoryResource::collection($categories)->response()->getData(true);
+        return formatAPIResourcePaginate($data);
     }
 
     /**
@@ -79,8 +90,11 @@ class CategoryController extends CoreController
      */
     public function store(CategoryCreateRequest $request)
     {
-        $validatedData = $request->validated();
-        return $this->repository->create($validatedData);
+        try {
+            return $this->repository->saveCategory($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_CREATE_THE_RESOURCE);
+        }
         // $language = $request->language ?? DEFAULT_LANGUAGE;
         // $translation_item_id = $request->translation_item_id ?? null;
         // $category->storeTranslation($translation_item_id, $language);
@@ -95,15 +109,16 @@ class CategoryController extends CoreController
      */
     public function show(Request $request, $params)
     {
-
         try {
             $language = $request->language ?? DEFAULT_LANGUAGE;
             if (is_numeric($params)) {
                 $params = (int) $params;
-                return $this->repository->with(['type', 'parent', 'children'])->where('id', $params)->firstOrFail();
+                $category = $this->repository->with(['type', 'parentCategory', 'children'])->where('id', $params)->firstOrFail();
+                return new CategoryResource($category);
             }
-            return $this->repository->with(['type', 'parent', 'children'])->where('slug', $params)->where('language', $language)->firstOrFail();
-        } catch (\Exception $e) {
+            $category = $this->repository->with(['type', 'parentCategory', 'children'])->where('slug', $params)->firstOrFail();
+            return new CategoryResource($category);
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -118,11 +133,18 @@ class CategoryController extends CoreController
     public function update(CategoryUpdateRequest $request, $id)
     {
         try {
-            $validatedData = $request->validated();
-            return $this->repository->findOrFail($id)->update($validatedData);
-        } catch (\Exception $e) {
+            $request->merge(['id' => $id]);
+            return $this->categoryUpdate($request);
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
+    }
+
+
+    public function categoryUpdate(CategoryUpdateRequest $request)
+    {
+        $category = $this->repository->findOrFail($request->id);
+        return $this->repository->updateCategory($request, $category);
     }
 
     /**
@@ -135,7 +157,7 @@ class CategoryController extends CoreController
     {
         try {
             return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }

@@ -3,13 +3,13 @@
 
 namespace Marvel\Database\Repositories;
 
+use Exception;
 use Marvel\Database\Models\Balance;
 use Marvel\Database\Models\Shop;
 use Marvel\Enums\Permission;
-use Marvel\Exceptions\MarvelException;
 use Prettus\Repository\Criteria\RequestCriteria;
 use Prettus\Repository\Exceptions\RepositoryException;
-use Prettus\Validator\Exceptions\ValidatorException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class ShopRepository extends BaseRepository
 {
@@ -29,6 +29,7 @@ class ShopRepository extends BaseRepository
      */
     protected $dataArray = [
         'name',
+        'slug',
         'description',
         'cover_image',
         'logo',
@@ -60,6 +61,7 @@ class ShopRepository extends BaseRepository
     {
         try {
             $data = $request->only($this->dataArray);
+            $data['slug'] = $this->makeSlug($request);
             $data['owner_id'] = $request->user()->id;
             $shop = $this->create($data);
             if (isset($request['categories'])) {
@@ -71,8 +73,8 @@ class ShopRepository extends BaseRepository
             $shop->categories = $shop->categories;
             $shop->staffs = $shop->staffs;
             return $shop;
-        } catch (ValidatorException $e) {
-            throw new MarvelException(SOMETHING_WENT_WRONG);
+        } catch (Exception $e) {
+            throw new HttpException(400, COULD_NOT_CREATE_THE_RESOURCE);
         }
     }
 
@@ -92,13 +94,17 @@ class ShopRepository extends BaseRepository
                     $this->updateBalance($request['balance'], $id);
                 }
             }
-            $shop->update($request->only($this->dataArray));
+            $data = $request->only($this->dataArray);
+            if (!empty($request->slug) &&  $request->slug != $shop['slug']) {
+                $data['slug'] = $this->makeSlug($request);
+            }
+            $shop->update($data);
             $shop->categories = $shop->categories;
             $shop->staffs = $shop->staffs;
             $shop->balance = $shop->balance;
             return $shop;
-        } catch (ValidatorException $e) {
-            throw new MarvelException(SOMETHING_WENT_WRONG);
+        } catch (Exception $e) {
+            throw new HttpException(400, COULD_NOT_UPDATE_THE_RESOURCE);
         }
     }
 

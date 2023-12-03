@@ -11,7 +11,7 @@ use Marvel\Database\Models\Wishlist;
 use Marvel\Exceptions\MarvelException;
 use Prettus\Repository\Criteria\RequestCriteria;
 use Prettus\Repository\Exceptions\RepositoryException;
-
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class WishlistRepository extends BaseRepository
 {
@@ -56,7 +56,7 @@ class WishlistRepository extends BaseRepository
                 return $this->create($wishlistInput);
             }
         } catch (\Exception $e) {
-            throw new MarvelException(ALREADY_ADDED_TO_WISHLIST_FOR_THIS_PRODUCT);
+            throw new HttpException(400, ALREADY_ADDED_TO_WISHLIST_FOR_THIS_PRODUCT);
         }
     }
 

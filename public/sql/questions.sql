@@ -1,3 +1,5 @@
+
+
 INSERT INTO `questions` (`id`, `user_id`, `shop_id`, `product_id`, `question`, `answer`, `deleted_at`, `created_at`, `updated_at`) VALUES
 (1, 2, 6, 2, 'Hi \nIs this a Fresh product?', 'yes these are fresh products.', NULL, '2022-03-17 13:13:14', '2022-03-17 13:43:33'),
 (2, 2, 6, 1, 'Hi\nHow long I can store this product?', 'in freezer you can store theme for about 2 weeks in minimum', NULL, '2022-03-17 13:14:10', '2022-03-17 13:43:17'),

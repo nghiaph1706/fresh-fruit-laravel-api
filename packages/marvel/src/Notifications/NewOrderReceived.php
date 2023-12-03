@@ -6,6 +6,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
+use Illuminate\Support\Facades\App;
 use Marvel\Database\Models\Order;
 
 class NewOrderReceived extends Notification implements ShouldQueue
@@ -13,15 +14,17 @@ class NewOrderReceived extends Notification implements ShouldQueue
     use Queueable;
 
     protected $order;
+    protected string $receiver;
 
     /**
      * Create a new notification instance.
      *
      * @return void
      */
-    public function __construct(Order $order)
+    public function __construct(Order $order, string $receiver = 'storeOwner')
     {
         $this->order = $order;
+        $this->receiver = $receiver;
     }
 
     /**
@@ -43,9 +46,23 @@ class NewOrderReceived extends Notification implements ShouldQueue
      */
     public function toMail($notifiable)
     {
+        App::setLocale($this->order->language ?? DEFAULT_LANGUAGE);
+        $customer =  $this->order->customer ?? null;
+        if (!$customer) {
+            $customer = 'Guest Customer';
+        } else {
+            $customer = $customer->name;
+        }
+        if ($this->receiver == 'admin') {
+            $subject = __('sms.order.orderCreated.admin.subject');
+            $url  =  config('shop.dashboard_url') . '/orders/' . $this->order->id;
+        } else {
+            $subject = __('sms.order.orderCreated.storeOwner.subject');
+            $url =  config('shop.dashboard_url') . $this->order->shop->slug . '/orders/' . $this->order->id;
+        }
         return (new MailMessage)
-            ->subject('New Order is Received!')
-            ->markdown('emails.order.order-received', ['order' => $this->order, 'url' => config('shop.dashboard_url') . $this->order->shop->slug . '/orders/' . $this->order->id]);
+            ->subject($subject)
+            ->markdown('emails.order.order-received', ['order' => $this->order, 'customer' => $customer, 'receiver' => $this->receiver, 'url' => $url]);
     }
 
     /**

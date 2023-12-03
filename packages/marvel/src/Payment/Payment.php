@@ -82,12 +82,12 @@ class Payment
     return $this->payment->confirmPaymentIntent($payment_intent_id, $data);
   }
 
-    /**
-     * verify
-     *
-     * @param $id
-     * @return bool
-     */
+  /**
+   * verify
+   *
+   * @param $id
+   * @return bool
+   */
   public function verify($id): mixed
   {
     return $this->payment->verify($id);

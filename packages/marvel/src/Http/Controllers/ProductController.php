@@ -4,12 +4,11 @@ namespace Marvel\Http\Controllers;
 
 use Exception;
 use Carbon\Carbon;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Str;
 use Illuminate\Http\Request;
 use Marvel\Database\Models\Type;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Marvel\Database\Models\Product;
 use Marvel\Database\Models\Wishlist;
 use Marvel\Database\Models\Variation;
@@ -18,15 +17,25 @@ use Illuminate\Database\Eloquent\Collection;
 use Marvel\Http\Requests\ProductCreateRequest;
 use Marvel\Http\Requests\ProductUpdateRequest;
 use Marvel\Database\Repositories\ProductRepository;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Marvel\Database\Repositories\SettingsRepository;
+use Symfony\Component\HttpKernel\Exception\HttpException;
+use Marvel\Database\Models\Settings;
+use Marvel\Exceptions\MarvelNotFoundException;
+use \OpenAI;
+use Marvel\Enums\Permission;
+use Marvel\Http\Resources\GetSingleProductResource;
+use Marvel\Http\Resources\ProductResource;
 
 class ProductController extends CoreController
 {
     public $repository;
 
-    public function __construct(ProductRepository $repository)
+    public $settings;
+
+    public function __construct(ProductRepository $repository, SettingsRepository $settings)
     {
         $this->repository = $repository;
+        $this->settings = $settings;
     }
 
 
@@ -39,37 +48,78 @@ class ProductController extends CoreController
     public function index(Request $request)
     {
         $limit = $request->limit ?   $request->limit : 15;
-        return $this->fetchProducts($request)->paginate($limit);
+        $products = $this->fetchProducts($request)->paginate($limit)->withQueryString();
+        $data = ProductResource::collection($products)->response()->getData(true);
+        return formatAPIResourcePaginate($data);
     }
 
+
+
+    /**
+     * fetchProducts
+     *
+     * @param  mixed $request
+     * @return object
+     */
     public function fetchProducts(Request $request)
     {
         $unavailableProducts = [];
         $language = $request->language ? $request->language : DEFAULT_LANGUAGE;
+
+        $products_query = $this->repository->where('language', $language);
+
         if (isset($request->date_range)) {
             $dateRange = explode('//', $request->date_range);
             $unavailableProducts = $this->repository->getUnavailableProducts($dateRange[0], $dateRange[1]);
         }
         if (in_array('variation_options.digital_files', explode(';', $request->with)) || in_array('digital_files', explode(';', $request->with))) {
-            throw new MarvelException(config('shop.app_notice_domain') . 'ERROR.NOT_AUTHORIZED');
+            throw new AuthorizationException(NOT_AUTHORIZED);
         }
-        return $this->repository->where('language', $language)->whereNotIn('id', $unavailableProducts);
+        $products_query = $products_query->whereNotIn('id', $unavailableProducts);
+
+        if ($request->flash_sale_builder) {
+            $products_query = $this->repository->processFlashSaleProducts($request, $products_query);
+        }
+
+        return $products_query;
     }
 
+
+
     /**
-     * Store a newly created resource in storage.
+     * Store a newly created resource in storage by rest.
      *
      * @param ProductCreateRequest $request
      * @return mixed
      */
     public function store(ProductCreateRequest $request)
     {
-        if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
-            return $this->repository->storeProduct($request);
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
+        return $this->ProductStore($request);
+    }
+
+
+
+    /**
+     * Store a newly created resource in storage by GQL.
+     *
+     * @param Request $request
+     * @return mixed
+     */
+    public function ProductStore(Request $request)
+    {
+        try {
+            $setting = $this->settings->first();
+            if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
+                return $this->repository->storeProduct($request, $setting);
+            } else {
+                throw new AuthorizationException(NOT_AUTHORIZED);
+            }
+        } catch (MarvelException $e) {
+            throw new MarvelException(SOMETHING_WENT_WRONG, $e->getMessage());
         }
     }
+
+
 
     /**
      * Display the specified resource.
@@ -79,9 +129,16 @@ class ProductController extends CoreController
      */
     public function show(Request $request, $slug)
     {
-        $request->slug = $slug;
-        return $this->fetchSingleProduct($request);
+        $request->merge(['slug' => $slug]);
+        try {
+            $product = $this->fetchSingleProduct($request);
+            return new GetSingleProductResource($product);
+        } catch (MarvelException $e) {
+            throw new MarvelException(NOT_FOUND);
+        }
     }
+
+
 
     /**
      * Display the specified resource.
@@ -91,36 +148,29 @@ class ProductController extends CoreController
      */
     public function fetchSingleProduct(Request $request)
     {
-        $slug = $request->slug;
-        $language = $request->language ?? DEFAULT_LANGUAGE;
-        $user = $request->user();
-        $limit = isset($request->limit) ? $request->limit : 10;
-
         try {
-            if (is_numeric($slug)) {
-                $slug = (int) $slug;
-                $product = $this->repository->where('id', $slug)
-                    // ->with(['type', 'shop', 'categories', 'tags', 'variations.attribute.values', 'variation_options', 'author', 'manufacturer'])
-                    ->firstOrFail();
+            $slug = $request->slug;
+            $language = $request->language ?? DEFAULT_LANGUAGE;
+            $user = $request->user();
+            $limit = isset($request->limit) ? $request->limit : 10;
+            $product = $this->repository->where('language', $language)->where('slug', $slug)->orWhere('id', $slug)->firstOrFail();
+            if (
+                in_array('variation_options.digital_file', explode(';', $request->with)) || in_array('digital_file', explode(';', $request->with))
+            ) {
+                if (!$this->repository->hasPermission($user, $product->shop_id)) {
+                    throw new AuthorizationException(NOT_AUTHORIZED);
+                }
             }
+            $related_products = $this->repository->fetchRelated($slug, $limit, $language);
+            $product->setRelation('related_products', $related_products);
 
-            $product = $this->repository->where('language', $language)->where('slug', $slug)
-                // ->with(['type', 'shop', 'categories', 'tags', 'variations.attribute.values', 'variation_options', 'author', 'manufacturer'])
-                ->firstOrFail();
-        } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
+            return $product;
+        } catch (Exception $e) {
+            throw new MarvelNotFoundException();
         }
-        $product['related_products'] = $this->repository->fetchRelated($slug, $limit, $language);
-
-        if (
-            in_array('variation_options.digital_file', explode(';', $request->with)) || in_array('digital_file', explode(';', $request->with))
-        ) {
-            if (!$this->repository->hasPermission($user, $product->shop_id)) {
-                throw new MarvelException(config('shop.app_notice_domain') . 'ERROR.NOT_AUTHORIZED');
-            }
-        }
-        return $product;
     }
+
+
     /**
      * Update the specified resource in storage.
      *
@@ -130,19 +180,32 @@ class ProductController extends CoreController
      */
     public function update(ProductUpdateRequest $request, $id)
     {
-        $request->id = $id;
-        return $this->updateProduct($request);
-    }
-
-    public function updateProduct(Request $request)
-    {
-        if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
-            $id = $request->id;
-            return $this->repository->updateProduct($request, $id);
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
+        try {
+            $request->id = $id;
+            return $this->updateProduct($request);
+        } catch (MarvelException $e) {
+            throw new MarvelException(COULD_NOT_UPDATE_THE_RESOURCE);
         }
     }
+
+
+    /**
+     * updateProduct
+     *
+     * @param  Request $request
+     * @return void
+     */
+    public function updateProduct(Request $request)
+    {
+        $setting = $this->settings->first();
+        if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
+            $id = $request->id;
+            return $this->repository->updateProduct($request, $id, $setting);
+        } else {
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        }
+    }
+
 
     /**
      * Remove the specified resource from storage.
@@ -150,15 +213,41 @@ class ProductController extends CoreController
      * @param $id
      * @return JsonResponse
      */
-    public function destroy($id)
+    public function destroy(Request $request, $id)
+    {
+        $request->id = $id;
+        return $this->destroyProduct($request);
+    }
+
+
+    /**
+     * destroyProduct
+     *
+     * @param  Request $request
+     * @return void
+     */
+    public function destroyProduct(Request $request)
     {
         try {
-            return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
+            $product = $this->repository->findOrFail($request->id);
+            if ($this->repository->hasPermission($request->user(), $product->shop_id)) {
+                $product->delete();
+                return $product;
+            }
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $e) {
+            throw new MarvelException($e->getMessage());
         }
     }
 
+
+
+    /**
+     * relatedProducts
+     *
+     * @param  Request $request
+     * @return void
+     */
     public function relatedProducts(Request $request)
     {
         $limit = isset($request->limit) ? $request->limit : 10;
@@ -168,6 +257,14 @@ class ProductController extends CoreController
     }
 
 
+
+    /**
+     * exportProducts
+     *
+     * @param  Request $request
+     * @param  mixed $shop_id
+     * @return void
+     */
     public function exportProducts(Request $request, $shop_id)
     {
 
@@ -220,6 +317,9 @@ class ProductController extends CoreController
                 if (isset($row['blocked_dates'])) {
                     $row['blocked_dates'] = json_encode($row['blocked_dates']);
                 }
+                if (isset($row['video'])) {
+                    $row['video'] = json_encode($row['video']);
+                }
                 fputcsv($FH, $row);
             }
             fclose($FH);
@@ -228,6 +328,15 @@ class ProductController extends CoreController
         return response()->stream($callback, 200, $headers);
     }
 
+
+
+    /**
+     * exportVariableOptions
+     *
+     * @param  Request $request
+     * @param  mixed $shop_id
+     * @return void
+     */
     public function exportVariableOptions(Request $request, $shop_id)
     {
         $filename = 'variable-options-' . Str::random(5) . '.csv';
@@ -276,6 +385,15 @@ class ProductController extends CoreController
         return response()->stream($callback, 200, $headers);
     }
 
+
+
+
+    /**
+     * importProducts
+     *
+     * @param  Request $request
+     * @return void
+     */
     public function importProducts(Request $request)
     {
         $requestFile = $request->file();
@@ -291,7 +409,7 @@ class ProductController extends CoreController
         }
 
         if (!$this->repository->hasPermission($user, $shop_id)) {
-            throw new MarvelException(NOT_AUTHORIZED);
+            throw new AuthorizationException(NOT_AUTHORIZED);
         }
         if (isset($shop_id)) {
             $file = $uploadedCsv->storePubliclyAs('csv-files', 'products-' . $shop_id . '.' . $uploadedCsv->getClientOriginalExtension(), 'public');
@@ -306,6 +424,7 @@ class ProductController extends CoreController
                 $product['shop_id'] = $shop_id;
                 $product['image'] = json_decode($product['image'], true);
                 $product['gallery'] = json_decode($product['gallery'], true);
+                $product['video'] = json_decode($product['video'], true);
                 try {
                     $type = Type::findOrFail($product['type_id']);
                     if (isset($type->id)) {
@@ -319,6 +438,14 @@ class ProductController extends CoreController
         }
     }
 
+
+
+    /**
+     * importVariationOptions
+     *
+     * @param  Request $request
+     * @return void
+     */
     public function importVariationOptions(Request $request)
     {
         $requestFile = $request->file();
@@ -336,7 +463,7 @@ class ProductController extends CoreController
         }
 
         if (!$this->repository->hasPermission($user, $shop_id)) {
-            throw new MarvelException(NOT_AUTHORIZED);
+            throw new AuthorizationException(NOT_AUTHORIZED);
         }
         if (isset($user->id)) {
             $file = $uploadedCsv->storePubliclyAs('csv-files', 'variation-options-' . Str::random(5) . '.' . $uploadedCsv->getClientOriginalExtension(), 'public');
@@ -362,6 +489,14 @@ class ProductController extends CoreController
         }
     }
 
+
+
+    /**
+     * fetchDigitalFilesForProduct
+     *
+     * @param  Request $request
+     * @return void
+     */
     public function fetchDigitalFilesForProduct(Request $request)
     {
         $user = $request->user();
@@ -373,6 +508,14 @@ class ProductController extends CoreController
         }
     }
 
+
+
+    /**
+     * fetchDigitalFilesForVariation
+     *
+     * @param  Request $request
+     * @return void
+     */
     public function fetchDigitalFilesForVariation(Request $request)
     {
         $user = $request->user();
@@ -384,6 +527,28 @@ class ProductController extends CoreController
         }
     }
 
+
+
+    /**
+     * bestSellingProducts
+     *
+     * @param  Request $request
+     * @return void
+     */
+
+    public function bestSellingProducts(Request $request)
+    {
+        return $this->repository->getBestSellingProducts($request);
+    }
+
+
+
+    /**
+     * popularProducts
+     *
+     * @param  Request $request
+     * @return object
+     */
     public function popularProducts(Request $request)
     {
         $limit = $request->limit ? $request->limit : 10;
@@ -394,7 +559,7 @@ class ProductController extends CoreController
             try {
                 $type = Type::where('slug', $request->type_slug)->where('language', $language)->firstOrFail();
                 $type_id = $type->id;
-            } catch (ModelNotFoundException $e) {
+            } catch (MarvelException $e) {
                 throw new MarvelException(NOT_FOUND);
             }
         }
@@ -411,13 +576,21 @@ class ProductController extends CoreController
         return $products_query->take($limit)->get();
     }
 
+
+
+    /**
+     * calculateRentalPrice
+     *
+     * @param  Request $request
+     * @return void
+     */
     public function calculateRentalPrice(Request $request)
     {
         $isAvailable = true;
         $product_id = $request->product_id;
         try {
             $product = Product::findOrFail($product_id);
-        } catch (\Throwable $th) {
+        } catch (MarvelException $th) {
             throw new MarvelException(NOT_FOUND);
         }
         if (!$product->is_rental) {
@@ -454,16 +627,146 @@ class ProductController extends CoreController
         return $this->repository->calculatePrice($bookedDay, $product_id, $variation_id, $quantity, $persons, $dropoff_location_id, $pickup_location_id, $deposits, $features);
     }
 
+
+
+    /**
+     * myWishlists
+     *
+     * @param  Request $request
+     * @return void
+     */
     public function myWishlists(Request $request)
     {
         $limit = $request->limit ? $request->limit : 10;
         return $this->fetchWishlists($request)->paginate($limit);
     }
 
+
+
+    /**
+     * fetchWishlists
+     *
+     * @param  Request $request
+     * @return object
+     */
     public function fetchWishlists(Request $request)
     {
         $user = $request->user();
         $wishlist = Wishlist::where('user_id', $user->id)->pluck('product_id');
         return $this->repository->whereIn('id', $wishlist);
+    }
+
+
+    /**
+     * draftedProducts
+     *
+     * @param  Request $request
+     * @return void
+     */
+    public function draftedProducts(Request $request)
+    {
+        $limit = $request->limit ? $request->limit : 15;
+
+        return $this->fetchDraftedProducts($request)->paginate($limit);
+    }
+
+    /**
+     * fetchDraftedProducts
+     *
+     * @param  Request $request
+     * @return mixed
+     */
+    public function fetchDraftedProducts(Request $request)
+    {
+        $user = $request->user() ?? null;;
+        $language = $request->language ? $request->language : DEFAULT_LANGUAGE;
+
+        $products_query = $this->repository->with(['type', 'shop'])->where('language', $language);
+
+        switch ($user) {
+            case $user->hasPermissionTo(Permission::SUPER_ADMIN):
+                return $products_query->whereIn('shop_id', $user->shops->pluck('id'));
+                break;
+
+            case $user->hasPermissionTo(Permission::STORE_OWNER):
+                if (isset($request->shop_id)) {
+                    return $products_query->where('shop_id', '=', $request->shop_id);
+                } else {
+                    return $products_query->whereIn('shop_id', $user->shops->pluck('id'));
+                }
+                break;
+
+            case $user->hasPermissionTo(Permission::STAFF):
+                if (isset($request->shop_id)) {
+                    return $products_query->where('shop_id', '=', $request->shop_id);
+                } else {
+                    return $products_query->where('shop_id', $user->managed_shop->id);
+                }
+                break;
+        }
+
+        return $products_query;
+    }
+
+    /**
+     * productStock
+     *
+     * @param  Request $request
+     * @return void
+     */
+    public function productStock(Request $request)
+    {
+        $limit = $request->limit ? $request->limit : 15;
+
+        return $this->fetchProductStock($request)->paginate($limit);
+    }
+
+    /**
+     * productStock
+     *
+     * @param  Request $request
+     * @return mixed
+     */
+    public function fetchProductStock(Request $request)
+    {
+        $user = $request->user();
+        $language = $request->language ? $request->language : DEFAULT_LANGUAGE;
+
+        $products_query = $this->repository->with(['type', 'shop'])->where('language', $language)->where('quantity', '<', 10);
+
+        switch ($user) {
+            case $user->hasPermissionTo(Permission::SUPER_ADMIN):
+                if (isset($request->shop_id)) {
+                    return $products_query->where('shop_id', '=', $request->shop_id);
+                } else {
+                    return $products_query;
+                }
+                break;
+
+            case $user->hasPermissionTo(Permission::STORE_OWNER):
+                if (isset($request->shop_id)) {
+                    // shop specific
+                    return $products_query->where('shop_id', '=', $request->shop_id);
+                } else {
+                    // overall shops
+                    return $products_query->whereIn('shop_id', $user->shops->pluck('id'));
+                }
+                break;
+
+            case $user->hasPermissionTo(Permission::STAFF):
+                if (isset($request->shop_id)) {
+                    return $products_query->where('shop_id', '=', $request->shop_id);
+                } else {
+                    return $products_query->where('shop_id', '=', null);
+                }
+                break;
+
+            default:
+                return $products_query->where('shop_id', '=', null);
+
+                break;
+        }
+
+        return $products_query;
     }
 }

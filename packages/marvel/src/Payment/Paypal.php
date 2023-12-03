@@ -9,6 +9,8 @@ use Marvel\Enums\PaymentStatus;
 use Marvel\Traits\PaymentTrait;
 use Razorpay\Api\Errors\SignatureVerificationError;
 use Srmklive\PayPal\Services\PayPal as PayPalClient;
+use Symfony\Component\HttpKernel\Exception\HttpException;
+use Illuminate\Support\Str;
 use Throwable;
 
 class Paypal extends Base implements PaymentInterface
@@ -77,7 +79,7 @@ class Paypal extends Base implements PaymentInterface
         try {
             extract($data);
             $redirectUrl = config('shop.shop_url');
-            $this->paypalClient->setRequestHeader("PayPal-Request-Id", \Str::uuid());
+            $this->paypalClient->setRequestHeader("PayPal-Request-Id", Str::uuid());
             $order = $this->paypalClient->createOrder([
                 "intent"         => "CAPTURE",
                 "purchase_units" => [
@@ -104,7 +106,7 @@ class Paypal extends Base implements PaymentInterface
             ]);
             return ['redirect_url' => $order['links'][1]['href'], 'payment_id' => $order["id"], 'is_redirect' => true];
         } catch (Exception $e) {
-            throw new Exception(SOMETHING_WENT_WRONG_WITH_PAYMENT);
+            throw new HttpException(400, SOMETHING_WENT_WRONG_WITH_PAYMENT);
         }
     }
 
@@ -144,7 +146,7 @@ class Paypal extends Base implements PaymentInterface
             $result = $this->paypalClient->capturePaymentOrder($id);
             return isset($result["status"]) ? $result : false;
         } catch (Exception $e) {
-            throw new Exception(SOMETHING_WENT_WRONG_WITH_PAYMENT);
+            throw new HttpException(400, SOMETHING_WENT_WRONG_WITH_PAYMENT);
         }
     }
 

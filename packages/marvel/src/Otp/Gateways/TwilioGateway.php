@@ -81,4 +81,31 @@ class TwilioGateway implements OtpInterface
 			return new Result(["Verification check failed: {$exception->getMessage()}"]);
 		}
 	}
+
+	/**
+	 * The function sends an SMS message using Twilio API and returns a result object.
+	 * 
+	 * @param phone_number The phone number to which the SMS message will be sent.
+	 * @param message The message to be sent via SMS.
+	 * 
+	 * @return Result an instance of the `Result` class. If the message is successfully sent, it returns a
+	 * `Result` object with the `sid` property set to the message ID. If there is an error, it returns a
+	 * `Result` object with an array containing an error message.
+	 */
+	public function sendSms($phone_number, $messageBody): Result
+	{
+
+		try {
+			$message = $this->client->messages->create(
+				"+$phone_number",
+				[
+					'from' => config('services.twilio.from'),
+					'body' => $messageBody
+				]
+			);
+			return new Result($message->sid);
+		} catch (TwilioException $exception) {
+			return new Result(["Message failed to send: {$exception->getMessage()}"]);
+		}
+	}
 }

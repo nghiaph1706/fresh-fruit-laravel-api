@@ -35,6 +35,7 @@ type Order {
     language: String
     refund: Refund @hasOne
     wallet_point: WalletPoint @hasOne
+    parent_id: ID
     parent_order: Order @belongsTo
     children: [Order] @hasMany
     order_status: String
@@ -46,6 +47,7 @@ type Order {
     paid_total: Float!
     payment_id: String
     payment_gateway: PaymentGatewayType!
+    altered_payment_gateway: String
     coupon: Coupon @belongsTo
     shop: Shop @belongsTo
     discount: Float
@@ -56,6 +58,7 @@ type Order {
     updated_at: DateTime
     billing_address: UserAddress
     shipping_address: UserAddress
+    note: String
 }
 
 type WalletPoint {
@@ -84,6 +87,7 @@ input UpdateOrderInput {
     delivery_time: String
     billing_address: UserAddressInput
     shipping_address: UserAddressInput
+    altered_payment_gateway: String
 }
 
 input CardInput {
@@ -103,6 +107,8 @@ input CreateOrderInput {
     paid_total: Float! @rules(apply: ["required"])
     payment_id: String
     payment_gateway: PaymentGatewayType! @rules(apply: ["required"])
+    altered_payment_gateway: String
+    payment_sub_gateway: String
     coupon_id: ID
     shop_id: ID
     customer_id: ID
@@ -116,6 +122,8 @@ input CreateOrderInput {
     billing_address: UserAddressInput!
     shipping_address: UserAddressInput!
     language: String
+    note: String
+    isFullWalletPayment: Boolean
 }
 
 input generateOrderExportUrlInput {
@@ -136,6 +144,8 @@ input TranslatedLanguage {
     quantity: String
     invoice_no: String
     date: String
+    paid_from_wallet: String
+    amount_due: String
 }
 
 input GenerateInvoiceDownloadUrlInput {
@@ -175,6 +185,7 @@ type PaymentResponse {
 
 input CreateOrderPaymentInput {
     tracking_number: String
+    payment_gateway: String
 }
 
 extend type Mutation {
@@ -187,6 +198,7 @@ extend type Mutation {
         @field(resolver: "OrderMutator@update")
     generateOrderExportUrl(input: generateOrderExportUrlInput! @spread): String
         @field(resolver: "AuthMutator@generateOrderExportUrl")
-    generateInvoiceDownloadUrl(input: GenerateInvoiceDownloadUrlInput! @spread): String
-        @field(resolver: "OrderMutator@generateInvoiceDownloadUrl")
+    generateInvoiceDownloadUrl(
+        input: GenerateInvoiceDownloadUrlInput! @spread
+    ): String @field(resolver: "OrderMutator@generateInvoiceDownloadUrl")
 }

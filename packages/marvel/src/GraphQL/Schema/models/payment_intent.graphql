@@ -1,6 +1,12 @@
 extend type Query {
-    getPaymentIntent(tracking_number: ID!): PaymentIntent
-        @field(resolver: "Marvel\\GraphQL\\Queries\\PaymentIntentQuery@getPaymentIntent")
+    getPaymentIntent(
+        tracking_number: ID!
+        payment_gateway: String!
+        recall_gateway: Boolean!
+    ): PaymentIntent
+        @field(
+            resolver: "Marvel\\GraphQL\\Queries\\PaymentIntentQuery@getPaymentIntent"
+        )
 }
 
 type PaymentIntent {
@@ -11,11 +17,12 @@ type PaymentIntent {
     payment_intent_info: PaymentIntentInfo
 }
 
-input SavePaymentMethodInput{
+input SavePaymentMethodInput {
     method_key: String!
     payment_intent: String
     save_card: Boolean
     tracking_number: String
+    payment_gateway: String
 }
 
 extend type Mutation {

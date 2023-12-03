@@ -92,4 +92,12 @@ class AuthMutator
     {
         return Shop::call('Marvel\Http\Controllers\UserController@subscribeToNewsletter', $args);
     }
+    public function updateUserEmail($rootValue, array $args, GraphQLContext $context)
+    {
+        return Shop::call('Marvel\Http\Controllers\UserController@updateUserEmail', $args);
+    }
+    public function resendVerificationEmail($rootValue, array $args, GraphQLContext $context)
+    {
+        return Shop::call('Marvel\Http\Controllers\UserController@sendVerificationEmail', $args);
+    }
 }

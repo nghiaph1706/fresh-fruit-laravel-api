@@ -6,6 +6,7 @@ use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Database\Eloquent\Model;
 use Marvel\Traits\TranslationTrait;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 
 class Variation extends Model
 {
@@ -22,6 +23,13 @@ class Variation extends Model
     'image'   => 'json',
   ];
 
+  protected function sku(): Attribute
+  {
+    return Attribute::make(
+      get: fn (string $value) => $value,
+      set: fn (string $value) => globalSlugify((string)$value, Variation::class, 'sku', '_'),
+    );
+  }
 
   /**
    * Get the user's full name.

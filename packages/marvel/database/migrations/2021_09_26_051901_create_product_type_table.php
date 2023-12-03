@@ -3,8 +3,6 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
-use Marvel\Enums\RefundStatus;
-use Marvel\Enums\WithdrawStatus;
 
 class CreateProductTypeTable extends Migration
 {
@@ -24,6 +22,7 @@ class CreateProductTypeTable extends Migration
             $table->boolean('is_external')->default(0);
             $table->string('external_product_url')->nullable();
             $table->string('external_product_button_text')->nullable();
+            $table->string('blocked_dates')->nullable();
         });
 
         Schema::create('digital_files', function (Blueprint $table) {

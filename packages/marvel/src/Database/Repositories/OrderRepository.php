@@ -5,9 +5,12 @@ namespace Marvel\Database\Repositories;
 
 use Carbon\Carbon;
 use Exception;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Marvel\Database\Models\Balance;
 use Marvel\Database\Models\Coupon;
@@ -16,6 +19,7 @@ use Marvel\Database\Models\OrderedFile;
 use Marvel\Database\Models\OrderWalletPoint;
 use Marvel\Database\Models\Wallet;
 use Marvel\Database\Models\Product;
+use Marvel\Database\Models\Settings;
 use Marvel\Database\Models\User;
 use Marvel\Database\Models\Variation;
 use Marvel\Enums\CouponType;
@@ -27,7 +31,7 @@ use Marvel\Enums\PaymentStatus;
 use Marvel\Events\OrderCreated;
 use Marvel\Events\OrderProcessed;
 use Marvel\Events\OrderReceived;
-use Marvel\Exceptions\MarvelException;
+use Marvel\Exceptions\MarvelBadRequestException;
 use Marvel\Traits\CalculatePaymentTrait;
 use Marvel\Traits\OrderManagementTrait;
 use Marvel\Traits\OrderStatusManagerWithPaymentTrait;
@@ -68,6 +72,7 @@ class OrderRepository extends BaseRepository
         'total',
         'delivery_time',
         'payment_gateway',
+        'altered_payment_gateway',
         'discount',
         'coupon_id',
         'logistics_provider',
@@ -76,6 +81,7 @@ class OrderRepository extends BaseRepository
         'delivery_fee',
         'customer_contact',
         'customer_name',
+        'note',
     ];
 
     public function boot()
@@ -106,7 +112,13 @@ class OrderRepository extends BaseRepository
     public function storeOrder($request, $settings): mixed
     {
         $request['tracking_number'] = $this->generateTrackingNumber();
-        $payment_gateway_type = isset($request->payment_gateway) ? $request->payment_gateway : PaymentGatewayType::CASH_ON_DELIVERY;
+        // $request->merge([
+        //     'payable'         => $request['paid_total'], // amount to be paid through paymentGateway
+        //     'wallet_currency' => 0
+        // ]);
+
+        $fullWalletOrCODPayment = $request?->isFullWalletPayment ? PaymentGatewayType::FULL_WALLET_PAYMENT : PaymentGatewayType::CASH_ON_DELIVERY;
+        $payment_gateway_type = !empty($request->payment_gateway) ? $request->payment_gateway : $fullWalletOrCODPayment;
 
         switch ($payment_gateway_type) {
             case PaymentGatewayType::CASH_ON_DELIVERY:
@@ -119,10 +131,10 @@ class OrderRepository extends BaseRepository
                 $request['payment_status'] = PaymentStatus::CASH;
                 break;
 
-            case PaymentGatewayType::FULL_WALLET_PAYMENT:
-                $request['order_status'] = OrderStatus::PROCESSING;
-                $request['payment_status'] = PaymentStatus::WALLET;
-                break;
+                // case PaymentGatewayType::FULL_WALLET_PAYMENT:
+                //     $request['order_status'] = OrderStatus::PROCESSING;
+                //     $request['payment_status'] = PaymentStatus::WALLET;
+                //     break;
 
             default:
                 $request['order_status'] = OrderStatus::PENDING;
@@ -138,11 +150,18 @@ class OrderRepository extends BaseRepository
         }
         try {
             $user = User::findOrFail($request['customer_id']);
-            if($user){
+            if ($user) {
                 $request['customer_name'] = $user->name;
             }
         } catch (Exception $e) {
             $user = null;
+        }
+
+        if (!$user) {
+            $settings = Settings::getData($request->language);
+            if (isset($settings->options['guestCheckout']) && !$settings->options['guestCheckout']) {
+                throw new AuthorizationException(NOT_AUTHORIZED);
+            }
         }
         $request['amount'] = $this->calculateSubtotal($request['products']);
 
@@ -150,8 +169,8 @@ class OrderRepository extends BaseRepository
             try {
                 $coupon = Coupon::findOrFail($request['coupon_id']);
                 $request['discount'] = $this->calculateDiscount($coupon,  $request['amount']);
-            } catch (\Throwable $th) {
-                throw new MarvelException(COUPON_NOT_FOUND);
+            } catch (Exception $th) {
+                throw $th;
             }
         }
 
@@ -163,7 +182,7 @@ class OrderRepository extends BaseRepository
 
         $request['paid_total'] = $request['amount'] + $request['sales_tax'] + $request['delivery_fee'] -  $request['discount'];
         $request['total'] = $request['paid_total'];
-        if ($useWalletPoints && $user) {
+        if (($useWalletPoints || $request->isFullWalletPayment) && $user) {
             $wallet = $user->wallet;
             $amount = null;
             if (isset($wallet->available_points)) {
@@ -171,7 +190,9 @@ class OrderRepository extends BaseRepository
             }
 
             if ($amount !== null && $amount <= 0) {
-                $request['payment_gateway'] = 'FULL_WALLET_PAYMENT';
+                $request['order_status'] = OrderStatus::COMPLETED;
+                $request['payment_gateway'] = PaymentGatewayType::FULL_WALLET_PAYMENT;
+                $request['payment_status'] = PaymentStatus::SUCCESS;
                 $order = $this->createOrder($request);
                 $this->storeOrderWalletPoint($request['paid_total'], $order->id);
                 $this->manageWalletAmount($request['paid_total'], $user->id);
@@ -183,18 +204,22 @@ class OrderRepository extends BaseRepository
 
         $order = $this->createOrder($request);
 
-        // Create Intent
-        if (!in_array($order->payment_gateway, [
-            PaymentGatewayType::CASH, PaymentGatewayType::CASH_ON_DELIVERY, PaymentGatewayType::FULL_WALLET_PAYMENT
-        ], true)) {
-            $order['payment_intent'] = $this->processPaymentIntent($request, $settings);
-        }
-
-
-        if ($useWalletPoints === true && $user) {
+        if (($useWalletPoints || $request->isFullWalletPayment) && $user) {
             $this->storeOrderWalletPoint(round($request['paid_total'], 2) - $amount, $order->id);
             $this->manageWalletAmount(round($request['paid_total'], 2), $user->id);
         }
+
+        $eligible = $this->checkOrderEligibility();
+        if (!$eligible) {
+            throw new MarvelBadRequestException('COULD_NOT_PROCESS_THE_ORDER_PLEASE_CONTACT_WITH_THE_ADMIN');
+        }
+        // Create Intent
+        if (!in_array($order->payment_gateway, [
+            PaymentGatewayType::CASH, PaymentGatewayType::CASH_ON_DELIVERY, PaymentGatewayType::FULL_WALLET_PAYMENT
+        ])) {
+            $order['payment_intent'] = $this->processPaymentIntent($request, $settings);
+        }
+
 
         if ($payment_gateway_type === PaymentGatewayType::CASH_ON_DELIVERY || $payment_gateway_type === PaymentGatewayType::CASH) {
             $this->orderStatusManagementOnCOD($order, OrderStatus::PENDING, OrderStatus::PROCESSING);
@@ -216,12 +241,7 @@ class OrderRepository extends BaseRepository
      */
     public function updateOrder($request)
     {
-        try {
-            $order = Order::findOrFail($request->id);
-        } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
-        }
-
+        $order = Order::findOrFail($request->id);
         $user = $request->user();
         if (isset($order->shop_id)) {
             if ($this->hasPermission($user, $order->shop_id)) {
@@ -230,7 +250,7 @@ class OrderRepository extends BaseRepository
         } else if ($user->hasPermissionTo(Permission::SUPER_ADMIN)) {
             return $this->changeOrderStatus($order, $request->order_status);
         } else {
-            throw new MarvelException(NOT_AUTHORIZED);
+            throw new AuthorizationException(NOT_AUTHORIZED);
         }
     }
 
@@ -271,8 +291,7 @@ class OrderRepository extends BaseRepository
             $wallet->points_used = $spend;
             $wallet->save();
         } catch (Exception $e) {
-
-            throw new MarvelException(SOMETHING_WENT_WRONG);
+            throw $e;
         }
     }
 
@@ -289,11 +308,42 @@ class OrderRepository extends BaseRepository
             $order->products()->attach($products);
             $this->createChildOrder($order->id, $request);
             //  $this->calculateShopIncome($order);
-            event(new OrderCreated($order));
+            $invoiceData = $this->createInvoiceDataForEmail($request, $order);
+            $customer = $request->user() ?? null;
+            event(new OrderCreated($order, $invoiceData, $customer));
             return $order;
         } catch (Exception $e) {
-            throw new MarvelException(SOMETHING_WENT_WRONG);
+            throw $e;
         }
+    }
+    /**
+     * This function creates an array of data for an email invoice, including order information,
+     * settings, translated text, and URL.
+     * 
+     * @param request This is an HTTP request object that contains information about the current
+     * request being made to the server. It is used to retrieve data from the request, such as the
+     * language and whether the text should be displayed right-to-left (RTL).
+     * @param order The order object that contains information about the order, such as the customer
+     * details, order items, and total amount.
+     * 
+     * @return array An array containing order data, settings data, translated text, RTL status,
+     * language, and a URL.
+     */
+    public function createInvoiceDataForEmail($request, $order): array
+    {
+        $language = $request->language ?? DEFAULT_LANGUAGE;
+        $isRTL = $request->is_rtl ?? false;
+
+        $translatedText = $this->formatInvoiceTranslateText($request->invoice_translated_text);
+        $settings = Settings::getData($language);
+        return [
+            'order'           => $order,
+            'settings'        => $settings,
+            'translated_text' => $translatedText,
+            'is_rtl'          => $isRTL,
+            'language'        => $language,
+            'url' => config('shop.shop_url') . '/orders/' . $order->tracking_number
+        ];
     }
 
     /**
@@ -332,10 +382,14 @@ class OrderRepository extends BaseRepository
             try {
                 if ($order->parent_id === null) {
                     $productData = Product::with('digital_file')->findOrFail($product['product_id']);
+
+                    // if rental product
                     $isRentalProduct = $productData->is_rental;
                     if ($isRentalProduct) {
                         $this->processRentalProduct($product, $order->id);
                     }
+
+
                     if ($productData->product_type === ProductType::SIMPLE) {
                         $this->storeOrderedFile($productData, $product['order_quantity'], $customer_id, $order->tracking_number);
                     } else if ($productData->product_type === ProductType::VARIABLE) {
@@ -344,7 +398,7 @@ class OrderRepository extends BaseRepository
                     }
                 }
             } catch (Exception $e) {
-                throw new MarvelException(NOT_FOUND);
+                throw $e;
             }
         }
         return $products;
@@ -410,7 +464,7 @@ class OrderRepository extends BaseRepository
                 }
             }
         } catch (\Throwable $th) {
-            throw new MarvelException(NOT_FOUND);
+            throw new ModelNotFoundException(NOT_FOUND);
         }
     }
 
@@ -513,5 +567,12 @@ class OrderRepository extends BaseRepository
         } while ($trackingNumbers->contains($trackingNumber));
 
         return $trackingNumber;
+    }
+
+    public function checkOrderEligibility(): bool
+    {
+        $settings = Settings::getData();
+        $useMustVerifyLicense = isset($settings->options['app_settings']['trust']) ? $settings->options['app_settings']['trust'] : false;
+        return $useMustVerifyLicense;
     }
 }

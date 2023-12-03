@@ -6,6 +6,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
+use Illuminate\Support\Facades\App;
 use Marvel\Database\Models\Order;
 
 class PaymentFailedNotification extends Notification implements ShouldQueue
@@ -43,8 +44,9 @@ class PaymentFailedNotification extends Notification implements ShouldQueue
      */
     public function toMail($notifiable)
     {
+        App::setLocale($this->order->language ?? DEFAULT_LANGUAGE);
         return (new MailMessage)
-            ->subject('Payment was failed')
+            ->subject(__('sms.order.paymentFailedOrder.admin.subject'))
             ->markdown(
                 'emails.payment.payment-failed',
                 [

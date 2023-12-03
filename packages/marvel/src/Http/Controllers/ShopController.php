@@ -2,12 +2,12 @@
 
 namespace Marvel\Http\Controllers;
 
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Request;
 use Marvel\Enums\Permission;
 use Marvel\Database\Models\Shop;
 use Marvel\Database\Models\User;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Log;
 use Marvel\Database\Models\Balance;
 use Marvel\Database\Models\Product;
 use Illuminate\Support\Facades\Hash;
@@ -16,7 +16,12 @@ use Marvel\Http\Requests\ShopCreateRequest;
 use Marvel\Http\Requests\ShopUpdateRequest;
 use Marvel\Http\Requests\UserCreateRequest;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Facades\DB;
+use Marvel\Database\Models\Settings;
 use Marvel\Database\Repositories\ShopRepository;
+use Marvel\Enums\Role;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class ShopController extends CoreController
 {
@@ -52,10 +57,13 @@ class ShopController extends CoreController
      */
     public function store(ShopCreateRequest $request)
     {
-        if ($request->user()->hasPermissionTo(Permission::STORE_OWNER)) {
-            return $this->repository->storeShop($request);
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
+        try {
+            if ($request->user()->hasPermissionTo(Permission::STORE_OWNER)) {
+                return $this->repository->storeShop($request);
+            }
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_CREATE_THE_RESOURCE);
         }
     }
 
@@ -74,9 +82,11 @@ class ShopController extends CoreController
             $shop = $shop->with('balance');
         }
         try {
-            $shop = $shop->findOneByFieldOrFail('slug', $slug);
-            return $shop;
-        } catch (\Exception $e) {
+            return match (true) {
+                is_numeric($slug) => $shop->where('id', $slug)->firstOrFail(),
+                is_string($slug)  => $shop->where('slug', $slug)->firstOrFail(),
+            };
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -90,8 +100,12 @@ class ShopController extends CoreController
      */
     public function update(ShopUpdateRequest $request, $id)
     {
-        $request->id = $id;
-        return $this->updateShop($request);
+        try {
+            $request->id = $id;
+            return $this->updateShop($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_UPDATE_THE_RESOURCE);
+        }
     }
 
     public function updateShop(Request $request)
@@ -99,9 +113,8 @@ class ShopController extends CoreController
         $id = $request->id;
         if ($request->user()->hasPermissionTo(Permission::SUPER_ADMIN) || ($request->user()->hasPermissionTo(Permission::STORE_OWNER) && ($request->user()->shops->contains($id)))) {
             return $this->repository->updateShop($request, $id);
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
         }
+        throw new AuthorizationException(NOT_AUTHORIZED);
     }
 
     /**
@@ -112,8 +125,12 @@ class ShopController extends CoreController
      */
     public function destroy(Request $request, $id)
     {
-        $request->id = $id;
-        return $this->deleteShop($request);
+        try {
+            $request->id = $id;
+            return $this->deleteShop($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_DELETE_THE_RESOURCE);
+        }
     }
 
     public function deleteShop(Request $request)
@@ -123,72 +140,101 @@ class ShopController extends CoreController
             try {
                 $shop = $this->repository->findOrFail($id);
             } catch (\Exception $e) {
-                throw new MarvelException(NOT_FOUND);
+                throw new ModelNotFoundException(NOT_FOUND);
             }
             $shop->delete();
             return $shop;
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
         }
+        throw new AuthorizationException(NOT_AUTHORIZED);
     }
 
     public function approveShop(Request $request)
     {
-        $id = $request->id;
-        $admin_commission_rate = $request->admin_commission_rate;
+
         try {
-            $shop = $this->repository->findOrFail($id);
-        } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
+            if (!$request->user()->hasPermissionTo(Permission::SUPER_ADMIN)) {
+                throw new MarvelException(NOT_AUTHORIZED);
+            }
+            $id = $request->id;
+            $admin_commission_rate = $request->admin_commission_rate;
+            $id = $request->id;
+            $admin_commission_rate = $request->admin_commission_rate;
+            try {
+                $shop = $this->repository->findOrFail($id);
+            } catch (\Exception $e) {
+                throw new ModelNotFoundException(NOT_FOUND);
+            }
+            $shop->is_active = true;
+            $shop->save();
+
+            if (Product::count() > 0) {
+                Product::where('shop_id', '=', $id)->update(['status' => 'publish']);
+            }
+
+            $balance = Balance::firstOrNew(['shop_id' => $id]);
+            $balance->admin_commission_rate = $admin_commission_rate;
+            $balance->save();
+            return $shop;
+        } catch (MarvelException $th) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
         }
-        $shop->is_active = true;
-        $shop->save();
-        $balance = Balance::firstOrNew(['shop_id' => $id]);
-        $balance->admin_commission_rate = $admin_commission_rate;
-        $balance->save();
-        return $shop;
     }
 
     public function disApproveShop(Request $request)
     {
-        $id = $request->id;
         try {
-            $shop = $this->repository->findOrFail($id);
-        } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
+            if (!$request->user()->hasPermissionTo(Permission::SUPER_ADMIN)) {
+                throw new MarvelException(NOT_AUTHORIZED);
+            }
+            $id = $request->id;
+            try {
+                $shop = $this->repository->findOrFail($id);
+            } catch (\Exception $e) {
+                throw new ModelNotFoundException(NOT_FOUND);
+            }
+
+            $shop->is_active = false;
+            $shop->save();
+
+            Product::where('shop_id', '=', $id)->update(['status' => 'draft']);
+
+            return $shop;
+        } catch (MarvelException $th) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
         }
-
-        $shop->is_active = false;
-        $shop->save();
-
-        Product::where('shop_id', '=', $id)->update(['status' => 'draft']);
-
-        return $shop;
     }
 
     public function addStaff(UserCreateRequest $request)
     {
-        if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
-            $permissions = [Permission::CUSTOMER, Permission::STAFF];
-            $user = User::create([
-                'name' => $request->name,
-                'email' => $request->email,
-                'shop_id' => $request->shop_id,
-                'password' => Hash::make($request->password),
-            ]);
+        try {
+            if ($this->repository->hasPermission($request->user(), $request->shop_id)) {
+                $permissions = [Permission::CUSTOMER, Permission::STAFF];
+                $user = User::create([
+                    'name' => $request->name,
+                    'email' => $request->email,
+                    'shop_id' => $request->shop_id,
+                    'password' => Hash::make($request->password),
+                ]);
 
-            $user->givePermissionTo($permissions);
+                $user->givePermissionTo($permissions);
+                $user->assignRole(Role::STAFF);
 
-            return true;
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
+                return true;
+            }
+            throw new AuthorizationException(NOT_AUTHORIZED);
+        } catch (MarvelException $th) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
         }
     }
 
     public function deleteStaff(Request $request, $id)
     {
-        $request->id = $id;
-        return $this->removeStaff($request);
+        try {
+            $request->id = $id;
+            return $this->removeStaff($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_DELETE_THE_RESOURCE);
+        }
     }
 
     public function removeStaff(Request $request)
@@ -197,14 +243,13 @@ class ShopController extends CoreController
         try {
             $staff = User::findOrFail($id);
         } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
+            throw new ModelNotFoundException(NOT_FOUND);
         }
         if ($request->user()->hasPermissionTo(Permission::STORE_OWNER) || ($request->user()->hasPermissionTo(Permission::STORE_OWNER) && ($request->user()->shops->contains('id', $staff->shop_id)))) {
             $staff->delete();
             return $staff;
-        } else {
-            throw new MarvelException(NOT_AUTHORIZED);
         }
+        throw new AuthorizationException(NOT_AUTHORIZED);
     }
 
     public function myShops(Request $request)
@@ -236,7 +281,7 @@ class ShopController extends CoreController
             $products_query = Product::withCount('orders')->with(['shop'])->whereIn('shop_id', $followedShopIds)->orderBy('orders_count', 'desc');
 
             return $products_query->take($limit)->get();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -254,7 +299,6 @@ class ShopController extends CoreController
         $currentUser = User::where('id', $user->id)->first();
 
         return $currentUser->follow_shops()->paginate($limit);
-
     }
 
     /**
@@ -278,7 +322,7 @@ class ShopController extends CoreController
             $shop_id = (int)$request->input('shop_id');
 
             return in_array($shop_id, $followedShopIds);
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -318,8 +362,64 @@ class ShopController extends CoreController
             if (count($response['detached'])) {
                 return false;
             }
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
+        }
+    }
+
+    public function nearByShop($lat, $lng, Request $request)
+    {
+        $request['lat'] = $lat;
+        $request['lng'] = $lng;
+
+        return $this->findShopDistance($request);
+    }
+
+    public function findShopDistance(Request $request)
+    {
+        try {
+            $settings = Settings::getData();
+            $maxShopDistance = isset($settings['options']['maxShopDistance']) ? $settings['options']['maxShopDistance'] : 1000;
+            $lat = $request->lat;
+            $lng = $request->lng;
+            if (!is_numeric($lat) || !is_numeric($lng)) {
+                throw new HttpException(400, 'invalid argument');
+            }
+
+            $near_shop = Shop::where('settings->location->lat', '!=', null)
+                ->where('settings->location->lng', '!=', null)
+                ->select(
+                    "shops.*",
+                    DB::raw("6371 * acos(cos(radians(" . $lat . ")) 
+        * cos(radians(json_unquote(json_extract(`shops`.`settings`, '$.\"location\".\"lat\"')))) 
+        * cos(radians(json_unquote(json_extract(`shops`.`settings`, '$.\"location\".\"lng\"'))) - radians(" . $lng . ")) 
+        + sin(radians(" . $lat . ")) 
+        * sin(radians(json_unquote(json_extract(`shops`.`settings`, '$.\"location\".\"lat\"'))))) AS distance")
+                )
+                ->orderBy('distance', 'ASC')
+                ->where('is_active', 1)
+                ->get()
+                ->where('distance', '<', $maxShopDistance);
+
+            return $near_shop;
+        } catch (MarvelException $e) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
+        }
+    }
+
+    /**
+     * newOrInActiveShops
+     *
+     * @param  Request $request
+     * @return Collection|Shop[]
+     */
+    public function newOrInActiveShops(Request $request)
+    {
+        try {
+            $limit = $request->limit ? $request->limit : 15;
+            return $this->repository->withCount(['orders', 'products'])->with(['owner.profile'])->where('is_active', '=', $request->is_active)->paginate($limit)->withQueryString();
+        } catch (MarvelException $e) {
+            throw new MarvelException(SOMETHING_WENT_WRONG, $e->getMessage());
         }
     }
 }

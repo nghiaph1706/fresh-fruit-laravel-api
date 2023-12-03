@@ -28,8 +28,9 @@ class PaymentMethodCreateRequest extends FormRequest
     public function rules()
     {
         return  [
-            'method_key'   => ['required', 'string'],
-            'default_card' => ['boolean'],
+            'method_key'      => ['required', 'string'],
+            'default_card'    => ['boolean'],
+            'payment_gateway' => ['required', 'string'],
         ];
     }
 

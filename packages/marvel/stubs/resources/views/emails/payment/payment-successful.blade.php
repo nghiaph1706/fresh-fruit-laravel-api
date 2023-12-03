@@ -1,14 +1,14 @@
 {{--$order collection is available here--}}
 
 @component('mail::message')
-# Payment is successful!
+# {{ __('sms.order.paymentSuccessOrder.admin.subject') }}
 
-Payment was received successfully. Order tracking id {{$order->tracking_number}}
+{{ __('sms.order.paymentSuccessOrder.admin.message',['ORDER_TRACKING_NUMBER'=>$order->tracking_number]) }}
 
 @component('mail::button', ['url' => $url ])
-View Order
+{{__('common.view-order')}}
 @endcomponent
 
-Thanks,<br>
+{{__('common.thanks')}},<br>
 {{ config('app.name') }}
 @endcomponent

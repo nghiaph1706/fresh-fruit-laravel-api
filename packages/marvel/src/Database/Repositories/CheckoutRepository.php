@@ -4,6 +4,7 @@
 namespace Marvel\Database\Repositories;
 
 use Exception;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Arr;
 use Marvel\Database\Models\Product;
 use Marvel\Database\Models\Tax;
@@ -11,8 +12,8 @@ use Marvel\Database\Models\Shipping;
 use Marvel\Database\Models\Settings;
 use Marvel\Database\Models\User;
 use Marvel\Database\Models\Variation;
-use Marvel\Exceptions\MarvelException;
 use Marvel\Traits\WalletsTrait;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class CheckoutRepository
 {
@@ -24,7 +25,7 @@ class CheckoutRepository
             try {
                 $user = User::findOrFail($request->customer_id);
             } catch (\Throwable $th) {
-                throw new MarvelException(NOT_FOUND);
+                throw new ModelNotFoundException(NOT_FOUND);
             }
         } else {
             $user = $request->user() ?? null;
@@ -34,11 +35,11 @@ class CheckoutRepository
         $minimumOrderAmount = isset($settings['options']['minimumOrderAmount']) ? $settings['options']['minimumOrderAmount'] : 0;
         $unavailable_products = $this->checkStock($request['products']);
         $amount = $this->getOrderAmount($request, $unavailable_products);
-        $shipping_charge = $settings['options']['freeShipping'] && $settings['options']['freeShippingAmount'] <= $amount ? 0 : $this->calculateShippingCharge($request, $amount);
+        $shipping_charge = !empty($settings['options']['freeShipping']) && $settings['options']['freeShippingAmount'] <= $amount ? 0 : $this->calculateShippingCharge($request, $amount);
         $tax = $this->calculateTax($request, $shipping_charge, $amount);
         $total = $amount + $tax + $shipping_charge;
         if ($total < $minimumOrderAmount) {
-            throw new MarvelException('Minimum order amount is ' . $minimumOrderAmount);
+            throw new HttpException(400, 'Minimum order amount is ' . $minimumOrderAmount);
         }
         return [
             'total_tax'            => $tax,
@@ -179,7 +180,7 @@ class CheckoutRepository
 
             // Get tax settings from settings
             $tax_class = $settings['options']['taxClass'];
-            return Tax::find($tax_class);
+            return Tax::findOrFail($tax_class);
         } catch (\Throwable $th) {
             return 0;
         }

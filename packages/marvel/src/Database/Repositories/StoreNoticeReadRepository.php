@@ -4,12 +4,14 @@
 namespace Marvel\Database\Repositories;
 
 use Exception;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Marvel\Database\Models\StoreNoticeRead;
 use Marvel\Exceptions\MarvelException;
 use Prettus\Repository\Criteria\RequestCriteria;
 use Prettus\Repository\Exceptions\RepositoryException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class StoreNoticeReadRepository extends BaseRepository
 {
@@ -70,11 +72,11 @@ class StoreNoticeReadRepository extends BaseRepository
                 ]
             );
             if (!$update) {
-                throw new MarvelException(NOT_FOUND);
+                throw new ModelNotFoundException(NOT_FOUND);
             }
             return $update;
         } catch (Exception $e) {
-            return response(['message' => SOMETHING_WENT_WRONG], 500);
+            throw new Exception(SOMETHING_WENT_WRONG);
         }
     }
 
@@ -95,18 +97,18 @@ class StoreNoticeReadRepository extends BaseRepository
             if ($exists) {
                 $this->whereIn('store_notice_id', $noticeIdArr)->where('user_id', $userId)->delete();
             }
-            $insertionArr = Arr::map($noticeIdArr, fn($noticeId) => [
+            $insertionArr = Arr::map($noticeIdArr, fn ($noticeId) => [
                 'store_notice_id' => $noticeId,
                 'user_id'         => $userId,
                 'is_read'         => true
             ]);
             $insert = $this->insert($insertionArr);
             if (!$insert) {
-                throw new MarvelException(NOT_FOUND);
+                throw new HttpException(400, NOT_FOUND);
             }
             return $this->whereIn('store_notice_id', $noticeIdArr)->where('user_id', $userId)->get();
         } catch (Exception $e) {
-            return response(['message' => SOMETHING_WENT_WRONG], 500);
+            throw new HttpException(400, SOMETHING_WENT_WRONG);
         }
     }
 }

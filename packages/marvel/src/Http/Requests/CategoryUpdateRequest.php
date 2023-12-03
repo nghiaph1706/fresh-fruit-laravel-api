@@ -29,6 +29,7 @@ class CategoryUpdateRequest extends FormRequest
     {
         return [
             'name'        => ['string', 'max:255'],
+            'slug'        => ['nullable', 'string'],
             'type_id'     => ['integer'],
             'icon'        => ['nullable', 'string'],
             'image'       => ['array'],

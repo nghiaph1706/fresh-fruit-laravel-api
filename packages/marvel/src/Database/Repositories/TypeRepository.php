@@ -48,6 +48,7 @@ class TypeRepository extends BaseRepository
 
     public function storeType($request)
     {
+        $request['slug'] = $this->makeSlug($request);
         $type = $this->create($request->only($this->dataArray));
         if (isset($request['banners']) && count($request['banners'])) {
             $type->banners()->createMany($request['banners']);
@@ -57,6 +58,12 @@ class TypeRepository extends BaseRepository
 
     public function updateType($request, $type)
     {
+
+        Type::whereJsonContains('settings->isHome', true)->where('slug', '!=', $type->slug)
+            ->update([
+                'settings->isHome' => false
+            ]);
+
         if (isset($request['banners'])) {
             foreach ($type->banners as $banner) {
                 $key = array_search($banner->id, array_column($request['banners'], 'id'));
@@ -73,7 +80,11 @@ class TypeRepository extends BaseRepository
                 }
             }
         }
-        $type->update($request->only($this->dataArray));
+        $data = $request->only($this->dataArray);
+        if (!empty($request->slug) &&  $request->slug != $type['slug']) {
+            $data['slug'] = $this->makeSlug($request);
+        }
+        $type->update($data);
         return $this->with('banners')->findOrFail($type->id);
     }
 }

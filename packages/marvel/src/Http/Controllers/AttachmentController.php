@@ -77,7 +77,7 @@ class AttachmentController extends CoreController
     {
         try {
             $this->repository->findOrFail($id);
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -104,7 +104,7 @@ class AttachmentController extends CoreController
     {
         try {
             return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }

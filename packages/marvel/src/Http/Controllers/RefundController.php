@@ -5,7 +5,9 @@ namespace Marvel\Http\Controllers;
 use App\Events\QuestionAnswered;
 use App\Events\RefundApproved;
 use Exception;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Marvel\Database\Models\Balance;
@@ -16,7 +18,10 @@ use Marvel\Enums\Permission;
 use Marvel\Enums\RefundStatus;
 use Marvel\Exceptions\MarvelException;
 use Marvel\Http\Requests\RefundRequest;
+use Marvel\Http\Resources\GetSingleRefundResource;
+use Marvel\Http\Resources\RefundResource;
 use Marvel\Traits\WalletsTrait;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class RefundController extends CoreController
 {
@@ -39,42 +44,47 @@ class RefundController extends CoreController
     public function index(Request $request)
     {
         $limit = $request->limit;
-        return $this->fetchRefunds($request)->paginate($limit)->withQueryString();
+        $refunds =  $this->fetchRefunds($request)->paginate($limit);
+        $data = RefundResource::collection($refunds)->response()->getData(true);
+        return formatAPIResourcePaginate($data);
     }
-
-    /**
-     * Fetch refunds
-     */
-    // public function fetchRefunds(Request $request)
-    // {
-    //     $language = $request->language ?? DEFAULT_LANGUAGE;
-    //     $user = $request->user();
-
-    //     $orderQuery = $this->repository->whereHas('order', function ($q) use ($language) {
-    //         $q->where('language', $language);
-    //     })->with(['order', 'shop', 'customer']);
-
-    //     if ($user && $user->hasPermissionTo(Permission::SUPER_ADMIN) && (!isset($request->shop_id) || $request->shop_id === 'undefined')) {
-    //         return $orderQuery->where('id', '!=', null)->where('shop_id', '=', null);
-    //     } else if ($this->repository->hasPermission($user, $request->shop_id)) {
-    //         return $orderQuery->where('shop_id', '=', $request->shop_id);
-    //     } else if ($user && $user->hasPermissionTo(Permission::CUSTOMER)) {
-    //         return $orderQuery->where('customer_id', $user->id)->where('shop_id', null);
-    //     }
-    //     throw new MarvelException(NOT_AUTHORIZED);
-    // }
 
     public function fetchRefunds(Request $request)
     {
-        $user = $request->user();
-        if ($user && $user->hasPermissionTo(Permission::SUPER_ADMIN) && (!isset($request->shop_id) || $request->shop_id === 'undefined')) {
-            return $this->repository->with(['order', 'shop', 'customer'])->where('id', '!=', null)->where('shop_id', '=', null);
-        } else if ($this->repository->hasPermission($user, $request->shop_id)) {
-            return $this->repository->with(['order', 'shop', 'customer'])->where('shop_id', '=', $request->shop_id);
-        } else if ($user && $user->hasPermissionTo(Permission::CUSTOMER)) {
-            return $this->repository->with(['order', 'shop', 'customer'])->where('customer_id', $user->id)->where('shop_id', null);
+        try {
+            $language = $request->language ?? DEFAULT_LANGUAGE;
+            $user = $request->user();
+            if (!$user) {
+                throw new AuthorizationException(NOT_AUTHORIZED);
+            }
+
+            $orderQuery = $this->repository->whereHas('order', function ($q) use ($language) {
+                $q->where('language', $language);
+            });
+
+            switch ($user) {
+                case $user->hasPermissionTo(Permission::SUPER_ADMIN):
+                    if ((!isset($request->shop_id) || $request->shop_id === 'undefined')) {
+                        return $orderQuery->where('id', '!=', null)->where('shop_id', '=', null);
+                    }
+                    return $orderQuery->where('shop_id', '=', $request->shop_id);
+                    break;
+
+                case $this->repository->hasPermission($user, $request->shop_id):
+                    return $orderQuery->where('shop_id', '=', $request->shop_id);
+                    break;
+
+                case $user->hasPermissionTo(Permission::CUSTOMER):
+                    return $orderQuery->where('customer_id', $user->id)->where('shop_id', null);
+                    break;
+
+                default:
+                    return $orderQuery->where('customer_id', $user->id)->where('shop_id', null);
+                    break;
+            }
+        } catch (MarvelException $th) {
+            throw new MarvelException(SOMETHING_WENT_WRONG);
         }
-        throw new MarvelException(NOT_AUTHORIZED);
     }
 
     /**
@@ -86,10 +96,14 @@ class RefundController extends CoreController
      */
     public function store(RefundRequest $request)
     {
-        if (!$request->user()) {
-            throw new MarvelException(NOT_AUTHORIZED);
+        try {
+            if (!$request->user()) {
+                throw new AuthorizationException(NOT_AUTHORIZED);
+            }
+            return $this->repository->storeRefund($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_CREATE_THE_RESOURCE);
         }
-        return $this->repository->storeRefund($request);
     }
 
     /**
@@ -101,8 +115,9 @@ class RefundController extends CoreController
     public function show($id)
     {
         try {
-            return $this->repository->with(['shop', 'order', 'customer'])->findOrFail($id);
-        } catch (\Exception $e) {
+            $refund = $this->repository->with(['shop', 'order', 'customer', 'refund_policy','refund_reason'])->findOrFail($id);
+            return new GetSingleRefundResource($refund);
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -116,8 +131,12 @@ class RefundController extends CoreController
      */
     public function update(Request $request, $id)
     {
-        $request->id = $id;
-        return $this->updateRefund($request);
+        try {
+            $request->merge(['id' => $id]);
+            return $this->updateRefund($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_UPDATE_THE_RESOURCE);
+        }
     }
 
     public function updateRefund(Request $request)
@@ -128,10 +147,10 @@ class RefundController extends CoreController
             try {
                 $refund = $this->repository->with(['shop', 'order', 'customer'])->findOrFail($request->id);
             } catch (\Exception $e) {
-                throw new MarvelException(NOT_FOUND);
+                throw new ModelNotFoundException(NOT_FOUND);
             }
             if ($refund->status == RefundStatus::APPROVED) {
-                throw new MarvelException(ALREADY_REFUNDED);
+                throw new HttpException(400, ALREADY_REFUNDED);
             }
             $this->repository->updateRefund($request, $refund);
             if ($request->status == RefundStatus::APPROVED) {
@@ -144,7 +163,7 @@ class RefundController extends CoreController
                         $balance->save();
                     }
                 } catch (Exception $e) {
-                    throw new MarvelException(NOT_FOUND);
+                    throw new ModelNotFoundException(NOT_FOUND);
                 }
                 $wallet = Wallet::firstOrCreate(['customer_id' => $refund->customer_id]);
                 $walletPoints = $this->currencyToWalletPoints($refund->amount);
@@ -153,11 +172,10 @@ class RefundController extends CoreController
                 $wallet->save();
 
                 // refund approved event
-                event(new RefundApproved($refund));
             }
             return $refund;
         } else {
-            throw new MarvelException(NOT_AUTHORIZED);
+            throw new AuthorizationException(NOT_AUTHORIZED);
         }
     }
 
@@ -169,8 +187,12 @@ class RefundController extends CoreController
      */
     public function destroy(Request $request, $id)
     {
-        $request->id = $id;
-        return $this->deleteRefund($request);
+        try {
+            $request->merge(['id' => $id]);
+            return $this->deleteRefund($request);
+        } catch (MarvelException $th) {
+            throw new MarvelException(COULD_NOT_DELETE_THE_RESOURCE);
+        }
     }
 
     public function deleteRefund(Request $request)
@@ -178,13 +200,13 @@ class RefundController extends CoreController
         try {
             $refund = $this->repository->findOrFail($request->id);
         } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
+            throw new ModelNotFoundException(NOT_FOUND);
         }
         if ($this->repository->hasPermission($request->user())) {
             $refund->delete();
             return $refund;
         } else {
-            throw new MarvelException(NOT_AUTHORIZED);
+            throw new AuthorizationException(NOT_AUTHORIZED);
         }
     }
 }

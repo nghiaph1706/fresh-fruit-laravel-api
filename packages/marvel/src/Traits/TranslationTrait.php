@@ -77,15 +77,17 @@ trait TranslationTrait
     public function formatInvoiceTranslateText($translatedText = [])
     {
         return [
-            'subtotal'      => Arr::has($translatedText, 'subtotal') ? $translatedText['subtotal'] : 'SubTotal',
-            'discount'      => Arr::has($translatedText, 'discount') ? $translatedText['discount'] : 'Discount',
-            'tax'           => Arr::has($translatedText, 'tax') ? $translatedText['tax'] : 'Tax',
-            'delivery_fee'  => Arr::has($translatedText, 'delivery_fee') ? $translatedText['delivery_fee'] : 'Delivery Fee',
-            'total'         => Arr::has($translatedText, 'total') ? $translatedText['total'] : 'Total',
-            'products'      => Arr::has($translatedText, 'products') ? $translatedText['products'] : 'Products',
-            'quantity'      => Arr::has($translatedText, 'quantity') ? $translatedText['quantity'] : 'Qty',
-            'invoice_no'    => Arr::has($translatedText, 'invoice_no') ? $translatedText['invoice_no'] : 'Invoice No',
-            'date'          => Arr::has($translatedText, 'date') ? $translatedText['date'] : 'Date',
+            'subtotal'          => Arr::has($translatedText, 'subtotal') ? $translatedText['subtotal'] : 'SubTotal',
+            'discount'          => Arr::has($translatedText, 'discount') ? $translatedText['discount'] : 'Discount',
+            'tax'               => Arr::has($translatedText, 'tax') ? $translatedText['tax'] : 'Tax',
+            'delivery_fee'      => Arr::has($translatedText, 'delivery_fee') ? $translatedText['delivery_fee'] : 'Delivery Fee',
+            'total'             => Arr::has($translatedText, 'total') ? $translatedText['total'] : 'Total',
+            'products'          => Arr::has($translatedText, 'products') ? $translatedText['products'] : 'Products',
+            'quantity'          => Arr::has($translatedText, 'quantity') ? $translatedText['quantity'] : 'Qty',
+            'invoice_no'        => Arr::has($translatedText, 'invoice_no') ? $translatedText['invoice_no'] : 'Invoice No',
+            'date'              => Arr::has($translatedText, 'date') ? $translatedText['date'] : 'Date',
+            'paid_from_wallet'  => Arr::has($translatedText, 'paid_from_wallet') ? $translatedText['paid_from_wallet'] : 'Wallet Payment',
+            'amount_due'        => Arr::has($translatedText, 'amount_due') ? $translatedText['amount_due'] : 'Amount Due',
         ];
     }
 }

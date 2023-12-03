@@ -6,11 +6,13 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
+use Illuminate\Support\Facades\App;
 use Marvel\Database\Models\Order;
+use Marvel\Traits\SmsTrait;
 
 class OrderCancelledNotification extends Notification implements ShouldQueue
 {
-    use Queueable;
+    use Queueable, SmsTrait;
 
     protected $order;
 
@@ -43,8 +45,9 @@ class OrderCancelledNotification extends Notification implements ShouldQueue
      */
     public function toMail($notifiable)
     {
+        App::setLocale($this->order->language);
         return (new MailMessage)
-            ->subject('Order was cancelled')
+            ->subject(__('sms.order.cancelOrder.admin.subject'))
             ->markdown(
                 'emails.order.order-cancelled',
                 [

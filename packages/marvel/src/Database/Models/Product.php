@@ -27,6 +27,7 @@ class Product extends Model
 
     protected $table = 'products';
     protected $metaTable = 'products_meta'; //optional.
+    // protected $disableFluentMeta = true;
     public $hideMeta = true;
 
 
@@ -276,5 +277,13 @@ class Product extends Model
     public function features(): BelongsToMany
     {
         return $this->belongsToMany(Resource::class, 'feature_product', 'product_id', 'resource_id');
+    }
+
+    /**
+     * @return BelongsToMany
+     */
+    public function flash_sales(): BelongsToMany
+    {
+        return $this->belongsToMany(FlashSale::class, 'flash_sale_products');
     }
 }

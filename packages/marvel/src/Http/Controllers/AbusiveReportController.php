@@ -45,24 +45,23 @@ class AbusiveReportController extends CoreController
     public function store(AbusiveReportCreateRequest $request)
     {
 
-        $model_id = $request['model_id'];
-        $model_type = $request['model_type'];
-        $model_name = "Marvel\\Database\\Models\\{$model_type}";
         try {
+            $model_id = $request['model_id'];
+            $model_type = $request['model_type'];
+            $model_name = "Marvel\\Database\\Models\\{$model_type}";
             $model = $model_name::findOrFail($model_id);
-        } catch (\Exception $e) {
-            throw new MarvelException(NOT_FOUND);
+            $request['user_id'] = $request->user()->id;
+            return $this->repository->storeAbusiveReport($request, $model);
+        } catch (MarvelException $e) {
+            throw new MarvelException(COULD_NOT_CREATE_THE_RESOURCE);
         }
-        $request['user_id'] = $request->user()->id;
-
-        return $this->repository->storeAbusiveReport($request, $model);
     }
 
     public function show($id)
     {
         try {
             return $this->repository->findOrFail($id);
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -77,7 +76,7 @@ class AbusiveReportController extends CoreController
     {
         try {
             return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -89,7 +88,7 @@ class AbusiveReportController extends CoreController
             $model_type = $request['model_type'];
             $model = $model_type::findOrFail($model_id);
             return $model->delete();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -104,7 +103,7 @@ class AbusiveReportController extends CoreController
                 'model_type'    => $model_type
             ]);
             return $model_type::findOrFail($model_id);
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -115,7 +114,8 @@ class AbusiveReportController extends CoreController
      * @param Request $request
      * @return JsonResponse
      */
-    public function myReports(Request $request) {
+    public function myReports(Request $request)
+    {
         $limit = $request->limit ? $request->limit : 15;
 
         return $this->repository->where('user_id', auth()->user()->id)->paginate($limit);

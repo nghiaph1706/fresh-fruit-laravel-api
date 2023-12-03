@@ -55,7 +55,7 @@ class TaxController extends CoreController
     {
         try {
             return $this->repository->findOrFail($id);
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -72,7 +72,7 @@ class TaxController extends CoreController
         try {
             $validatedData = $request->validated();
             return $this->repository->findOrFail($id)->update($validatedData);
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }
@@ -87,7 +87,7 @@ class TaxController extends CoreController
     {
         try {
             return $this->repository->findOrFail($id)->delete();
-        } catch (\Exception $e) {
+        } catch (MarvelException $e) {
             throw new MarvelException(NOT_FOUND);
         }
     }

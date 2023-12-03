@@ -17,4 +17,8 @@ class ManufacturerMutator
     {
         return Shop::call('Marvel\Http\Controllers\ManufacturerController@updateManufacturer', $args);
     }
+    public function deleteManufacturer($rootValue, array $args, GraphQLContext $context)
+    {
+        return Shop::call('Marvel\Http\Controllers\ManufacturerController@deleteManufacturer', $args);
+    }
 }

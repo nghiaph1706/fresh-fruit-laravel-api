@@ -3,7 +3,6 @@
 namespace Marvel\Payments;
 
 use Exception;
-use Marvel\Exceptions\MarvelException;
 use Marvel\Database\Models\Order;
 use Marvel\Enums\OrderStatus;
 use Marvel\Enums\PaymentStatus;
@@ -12,6 +11,7 @@ use Marvel\Payments\Base;
 use Marvel\Traits\PaymentTrait;
 use Mollie\Laravel\Facades\Mollie as MollieFacade;
 use Razorpay\Api\Errors\SignatureVerificationError;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class Mollie extends Base implements PaymentInterface
 {
@@ -49,13 +49,13 @@ class Mollie extends Base implements PaymentInterface
       ]);
       return [
         'payment_id'   => $order->id,
-        'amount'       => $order->amount,
+        'amount'       => $order->amount->value,
         'invoice_id'   => $order_tracking_number,
         'redirect_url' => $order->getCheckoutUrl(),
         'is_redirect'  => true,
       ];
     } catch (Exception $e) {
-      throw new MarvelException(SOMETHING_WENT_WRONG_WITH_PAYMENT);
+      throw new HttpException(400, SOMETHING_WENT_WRONG_WITH_PAYMENT);
     }
   }
 
@@ -65,7 +65,7 @@ class Mollie extends Base implements PaymentInterface
       $order = MollieFacade::api()->payments()->get($paymentId);
       return isset($order->status) ? $order->status : false;
     } catch (Exception $e) {
-      throw new MarvelException(SOMETHING_WENT_WRONG_WITH_PAYMENT);
+      throw new HttpException(400, SOMETHING_WENT_WRONG_WITH_PAYMENT);
     }
   }
 

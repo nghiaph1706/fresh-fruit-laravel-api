@@ -3,6 +3,7 @@
 namespace Marvel\Http\Controllers;
 
 use Exception;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Request;
 use Marvel\Database\Models\Settings;
 use Marvel\Exceptions\MarvelException;
@@ -32,9 +33,12 @@ class PaymentIntentController extends CoreController
     public function getPaymentIntent(Request $request)
     {
         try {
+            if (!auth()->check() && !$this->settings->options['guestCheckout']) {
+                throw new AuthorizationException();
+            }
             return $this->repository->getPaymentIntent($request, $this->settings);
-        } catch (Exception $e) {
-            throw new MarvelException();
+        } catch (MarvelException $e) {
+            throw new MarvelException(SOMETHING_WENT_WRONG, $e->getMessage());
         }
     }
 }

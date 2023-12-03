@@ -61,4 +61,18 @@ class MessagebirdGateway implements OtpInterface
             return new Result(["Verification check failed: {$exception->getMessage()}"]);
         }
     }
+
+    public function sendSms($phone_number, $messageBody)
+    {
+        try {
+            $message = new \MessageBird\Objects\Message();
+            $message->originator = config('services.messagebird.originator');
+            $message->recipients = [$phone_number];
+            $message->body = $message;
+            $this->client->messages->create($messageBody);
+            return new Result('success');
+        } catch (Exception $exception) {
+            return new Result(["Verification check failed: {$exception->getMessage()}"]);
+        }
+    }
 }

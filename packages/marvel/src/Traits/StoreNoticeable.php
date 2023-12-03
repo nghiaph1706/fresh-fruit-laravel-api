@@ -2,7 +2,6 @@
 
 namespace Marvel\Traits;
 
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Marvel\Database\Models\StoreNotice;
@@ -21,15 +20,12 @@ trait StoreNoticeable
      */
     public function syncReadStatus(StoreNotice $storeNotice)
     {
-        if ($storeNotice->creator->hasPermissionTo(Permission::SUPER_ADMIN)) {
-            $userIdArr = User::whereHas('permissions', function (Builder $query) {
-                $query->whereIn('name', [Permission::SUPER_ADMIN, Permission::STORE_OWNER]);
-            })->pluck('id');
-        }
-        $userIdArr = User::whereHas('permissions', function (Builder $query) {
-            $query->whereIn('name', [Permission::STORE_OWNER, Permission::STAFF]);
-        })->pluck('id');
-
+        $userIdArr = match ($storeNotice->type) {
+            StoreNoticeType::ALL_VENDOR      => User::permission(Permission::STORE_OWNER)->get()->pluck('id'),
+            StoreNoticeType::ALL_SHOP        => $storeNotice->creator->shops->pluck('id'),
+            StoreNoticeType::SPECIFIC_SHOP   => $storeNotice->shops->pluck('id'),
+            StoreNoticeType::SPECIFIC_VENDOR => $storeNotice->users()->pluck('id'),
+        };
         $storeNoticeReadArray =  Arr::map(
             $userIdArr->toArray(),
             fn ($uId) => [
@@ -38,7 +34,7 @@ trait StoreNoticeable
                 "is_read"         => $uId === $storeNotice->created_by
             ]
         );
-        return $storeNotice->read_status()->attach($storeNoticeReadArray);
+        return $storeNotice->read_status()->sync($storeNoticeReadArray);
     }
 
     /**
@@ -52,9 +48,7 @@ trait StoreNoticeable
     {
         switch ($request->type) {
             case StoreNoticeType::ALL_VENDOR:
-                $request->received_by = User::whereHas('permissions', function (Builder $query) {
-                    $query->whereIn('name', [Permission::SUPER_ADMIN, Permission::STORE_OWNER]);
-                })->pluck('id');
+                $request->received_by = User::permission(Permission::STORE_OWNER)->pluck('id');
                 $storeNotice->users()->sync($request->received_by);
                 break;
             case StoreNoticeType::SPECIFIC_VENDOR:

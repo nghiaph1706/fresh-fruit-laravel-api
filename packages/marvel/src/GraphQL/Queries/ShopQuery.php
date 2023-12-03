@@ -23,4 +23,8 @@ class ShopQuery
     {
         return Shop::call('Marvel\Http\Controllers\ShopController@followedShopsPopularProducts', $args);
     }
+    public function findShopDistance($rootValue, array $args, GraphQLContext $context)
+    {
+        return Shop::call('Marvel\Http\Controllers\ShopController@findShopDistance', $args);
+    }
 }
